@@ -9,6 +9,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    networks:
+      - coolify
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
@@ -22,13 +24,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - coolify
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    expose:
-      - "8000"
     environment:
       - ENV_MODE=local
       - HOST=0.0.0.0
@@ -39,15 +41,12 @@ services:
       - FRONTEND_URL=https://suna.hossamdev.net
       - BACKEND_URL=https://sunaback.hossamdev.net
       
-      # Coolify SERVICE_FQDN - This tells Coolify to generate domain
-      - SERVICE_FQDN_BACKEND=https://sunaback.hossamdev.net
-      
       # Supabase Configuration
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
       
-      # Redis & RabbitMQ
+      # Redis & RabbitMQ - Use service names for internal communication
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - RABBITMQ_HOST=rabbitmq
@@ -107,14 +106,8 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    labels:
-      # Manual Traefik labels for backend service
-      - "traefik.enable=true"
-      - "traefik.http.routers.backend.rule=Host(`sunaback.hossamdev.net`)"
-      - "traefik.http.routers.backend.entrypoints=https"
-      - "traefik.http.routers.backend.tls=true"
-      - "traefik.http.routers.backend.tls.certresolver=letsencrypt"
-      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+    networks:
+      - coolify
 
   worker:
     build:
@@ -128,7 +121,7 @@ services:
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
       
-      # Redis & RabbitMQ
+      # Redis & RabbitMQ - Use service names for internal communication
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - RABBITMQ_HOST=rabbitmq
@@ -172,6 +165,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    networks:
+      - coolify
 
   frontend:
     build:
@@ -183,8 +178,6 @@ services:
         - NEXT_PUBLIC_BACKEND_URL=https://sunaback.hossamdev.net/api
         - NEXT_PUBLIC_URL=https://suna.hossamdev.net
         - NEXT_PUBLIC_ENV_MODE=LOCAL
-    expose:
-      - "3000"
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
@@ -193,19 +186,14 @@ services:
       - NEXT_PUBLIC_URL=https://suna.hossamdev.net
       - NEXT_PUBLIC_ENV_MODE=LOCAL
       
-      # Coolify SERVICE_FQDN - This tells Coolify to generate domain
-      - SERVICE_FQDN_FRONTEND=https://suna.hossamdev.net
-      
     depends_on:
       - backend
-    labels:
-      # Manual Traefik labels for frontend service
-      - "traefik.enable=true"
-      - "traefik.http.routers.frontend.rule=Host(`suna.hossamdev.net`)"
-      - "traefik.http.routers.frontend.entrypoints=https"
-      - "traefik.http.routers.frontend.tls=true"
-      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
-      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+    networks:
+      - coolify
+
+networks:
+  coolify:
+    external: true
 
 volumes:
   redis-data:
