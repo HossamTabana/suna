@@ -29,43 +29,68 @@ services:
       dockerfile: Dockerfile
     environment:
       - ENV_MODE=local
-      - CORS_ORIGINS=https://suna.hossamdev.net,https://suna.hossamdev.net:443
-      - CORS_ALLOW_CREDENTIALS=true
-      - CORS_ALLOW_METHODS=GET,POST,PUT,DELETE,OPTIONS
-      - CORS_ALLOW_HEADERS=*
+      - HOST=0.0.0.0
+      - PORT=8000
+      
+      # CORS Configuration
+      - CORS_ORIGINS=https://suna.hossamdev.net
+      - FRONTEND_URL=https://suna.hossamdev.net
+      - BACKEND_URL=https://sunaback.hossamdev.net
+      
+      # Supabase Configuration
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      
+      # Redis & RabbitMQ
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
+      
+      # LLM API Keys
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - MODEL_TO_USE=${MODEL_TO_USE}
+      
+      # Search & Scraping APIs
       - TAVILY_API_KEY=${TAVILY_API_KEY}
       - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
       - FIRECRAWL_URL=${FIRECRAWL_URL}
+      
+      # Optional APIs
       - RAPID_API_KEY=${RAPID_API_KEY}
       - SMITHERY_API_KEY=${SMITHERY_API_KEY}
+      
+      # QStash Configuration
       - QSTASH_URL=https://qstash.upstash.io
       - QSTASH_TOKEN=${QSTASH_TOKEN}
       - QSTASH_CURRENT_SIGNING_KEY=${QSTASH_CURRENT_SIGNING_KEY}
       - QSTASH_NEXT_SIGNING_KEY=${QSTASH_NEXT_SIGNING_KEY}
+      
+      # Slack Configuration
       - SLACK_CLIENT_ID=${SLACK_CLIENT_ID}
       - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET}
       - SLACK_REDIRECT_URI=https://sunaback.hossamdev.net/api/integrations/slack/callback
+      
+      # Webhook Configuration
       - WEBHOOK_BASE_URL=https://sunaback.hossamdev.net
+      
+      # MCP Configuration
       - MCP_CREDENTIAL_ENCRYPTION_KEY=${MCP_CREDENTIAL_ENCRYPTION_KEY}
+      
+      # Pipedream Configuration
       - PIPEDREAM_PROJECT_ID=${PIPEDREAM_PROJECT_ID}
       - PIPEDREAM_CLIENT_ID=${PIPEDREAM_CLIENT_ID}
       - PIPEDREAM_CLIENT_SECRET=${PIPEDREAM_CLIENT_SECRET}
       - PIPEDREAM_X_PD_ENVIRONMENT=${PIPEDREAM_X_PD_ENVIRONMENT}
+      
+      # Daytona Configuration
       - DAYTONA_API_KEY=${DAYTONA_API_KEY}
       - DAYTONA_SERVER_URL=https://app.daytona.io/api
       - DAYTONA_TARGET=us
-      - NEXT_PUBLIC_URL=https://suna.hossamdev.net
+      
     depends_on:
       redis:
         condition: service_healthy
@@ -76,6 +101,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
 
   worker:
     build:
@@ -83,31 +109,50 @@ services:
       dockerfile: Dockerfile
     environment:
       - ENV_MODE=local
+      
+      # Supabase Configuration
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      
+      # Redis & RabbitMQ
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
+      
+      # LLM API Keys
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - MODEL_TO_USE=${MODEL_TO_USE}
+      
+      # Search & Scraping APIs
       - TAVILY_API_KEY=${TAVILY_API_KEY}
       - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
       - FIRECRAWL_URL=${FIRECRAWL_URL}
+      
+      # Optional APIs
       - RAPID_API_KEY=${RAPID_API_KEY}
       - SMITHERY_API_KEY=${SMITHERY_API_KEY}
+      
+      # QStash Configuration
       - QSTASH_URL=https://qstash.upstash.io
       - QSTASH_TOKEN=${QSTASH_TOKEN}
       - QSTASH_CURRENT_SIGNING_KEY=${QSTASH_CURRENT_SIGNING_KEY}
       - QSTASH_NEXT_SIGNING_KEY=${QSTASH_NEXT_SIGNING_KEY}
+      
+      # Webhook Configuration
       - WEBHOOK_BASE_URL=https://sunaback.hossamdev.net
+      
+      # MCP Configuration
       - MCP_CREDENTIAL_ENCRYPTION_KEY=${MCP_CREDENTIAL_ENCRYPTION_KEY}
+      
+      # Daytona Configuration
       - DAYTONA_API_KEY=${DAYTONA_API_KEY}
       - DAYTONA_SERVER_URL=https://app.daytona.io/api
       - DAYTONA_TARGET=us
+      
     command: ["uv", "run", "dramatiq", "run_agent_background"]
     depends_on:
       redis:
