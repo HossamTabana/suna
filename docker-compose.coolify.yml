@@ -29,6 +29,10 @@ services:
       dockerfile: Dockerfile
     environment:
       - ENV_MODE=local
+      - CORS_ORIGINS=https://suna.hossamdev.net,https://suna.hossamdev.net:443
+      - CORS_ALLOW_CREDENTIALS=true
+      - CORS_ALLOW_METHODS=GET,POST,PUT,DELETE,OPTIONS
+      - CORS_ALLOW_HEADERS=*
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
