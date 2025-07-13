@@ -166,14 +166,14 @@ services:
         - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
         - NEXT_PUBLIC_BACKEND_URL=https://${COOLIFY_FQDN}/api
         - NEXT_PUBLIC_URL=https://${COOLIFY_FQDN}
-        - NEXT_PUBLIC_ENV_MODE=PRODUCTION
+        - NEXT_PUBLIC_ENV_MODE=local
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=local
       - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - NEXT_PUBLIC_BACKEND_URL=https://${COOLIFY_FQDN}/api
       - NEXT_PUBLIC_URL=https://${COOLIFY_FQDN}
-      - NEXT_PUBLIC_ENV_MODE=PRODUCTION
+      - NEXT_PUBLIC_ENV_MODE=local
     depends_on:
       - backend
 
