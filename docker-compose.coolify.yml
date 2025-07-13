@@ -11,6 +11,7 @@ services:
       retries: 3
     networks:
       - coolify
+    restart: unless-stopped
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
@@ -26,6 +27,7 @@ services:
       retries: 5
     networks:
       - coolify
+    restart: unless-stopped
 
   backend:
     build:
@@ -36,11 +38,15 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       
-      # CORS Configuration - CRITICAL: Allow frontend domain
-      - CORS_ORIGINS=https://suna.hossamdev.net,http://localhost:3000,http://localhost:3001
+      # CRITICAL CORS CONFIGURATION
+      - CORS_ORIGINS=*
       - CORS_ALLOW_CREDENTIALS=true
-      - CORS_ALLOW_METHODS=GET,POST,PUT,DELETE,OPTIONS
+      - CORS_ALLOW_METHODS=GET,POST,PUT,DELETE,OPTIONS,HEAD,PATCH
       - CORS_ALLOW_HEADERS=*
+      - CORS_EXPOSE_HEADERS=*
+      - CORS_MAX_AGE=86400
+      
+      # URLs
       - FRONTEND_URL=https://suna.hossamdev.net
       - BACKEND_URL=https://sunaback.hossamdev.net
       
@@ -52,6 +58,8 @@ services:
       # Redis & RabbitMQ - Use service names for internal communication
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_SSL=false
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
       
@@ -104,13 +112,20 @@ services:
       rabbitmq:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "-X", "GET", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
     networks:
       - coolify
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
 
   worker:
     build:
@@ -127,6 +142,8 @@ services:
       # Redis & RabbitMQ - Use service names for internal communication
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_SSL=false
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
       
@@ -168,8 +185,17 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      backend:
+        condition: service_started
     networks:
       - coolify
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
 
   frontend:
     build:
@@ -193,6 +219,13 @@ services:
       - backend
     networks:
       - coolify
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
 
 networks:
   coolify:
