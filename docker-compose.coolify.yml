@@ -73,10 +73,10 @@ services:
       # Slack Configuration (Optional)
       - SLACK_CLIENT_ID=${SLACK_CLIENT_ID}
       - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET}
-      - SLACK_REDIRECT_URI=https://${COOLIFY_FQDN}/api/integrations/slack/callback
+      - SLACK_REDIRECT_URI=https://suna.hossamdev.net/api/integrations/slack/callback
       
       # Webhook Configuration - Use backend domain
-      - WEBHOOK_BASE_URL=https://${COOLIFY_FQDN}
+      - WEBHOOK_BASE_URL=https://suna.hossamdev.net
       
       # MCP Configuration
       - MCP_CREDENTIAL_ENCRYPTION_KEY=${MCP_CREDENTIAL_ENCRYPTION_KEY}
@@ -93,7 +93,7 @@ services:
       - DAYTONA_TARGET=us
       
       # Frontend URL for CORS - Use frontend domain
-      - NEXT_PUBLIC_URL=https://${COOLIFY_FQDN}
+      - NEXT_PUBLIC_URL=https://suna.hossamdev.net
       
     depends_on:
       redis:
@@ -149,7 +149,7 @@ services:
       - QSTASH_NEXT_SIGNING_KEY=${QSTASH_NEXT_SIGNING_KEY}
       
       # Webhook Configuration
-      - WEBHOOK_BASE_URL=https://${COOLIFY_FQDN}
+      - WEBHOOK_BASE_URL=https://suna.hossamdev.net
       
       # MCP Configuration
       - MCP_CREDENTIAL_ENCRYPTION_KEY=${MCP_CREDENTIAL_ENCRYPTION_KEY}
@@ -176,7 +176,7 @@ services:
         - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
         # IMPORTANT: Point to backend domain, not frontend domain
         - NEXT_PUBLIC_BACKEND_URL=http://localhost:9090/api
-        - NEXT_PUBLIC_URL=https://${COOLIFY_FQDN}
+        - NEXT_PUBLIC_URL=https://suna.hossamdev.net
         - NEXT_PUBLIC_ENV_MODE=LOCAL
     ports:
       - "3080:3080"
@@ -186,7 +186,7 @@ services:
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       # IMPORTANT: Point to backend domain
       - NEXT_PUBLIC_BACKEND_URL=http://localhost:9090/api
-      - NEXT_PUBLIC_URL=https://${COOLIFY_FQDN}
+      - NEXT_PUBLIC_URL=https://suna.hossamdev.net
       - NEXT_PUBLIC_ENV_MODE=LOCAL
     depends_on:
       - backend
