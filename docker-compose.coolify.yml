@@ -1,9 +1,12 @@
 services:
   redis:
     image: redis:7-alpine
+    ports:
+      - "6379:6379"
     volumes:
-      - redis-data:/data
-    command: redis-server --save 60 1 --loglevel warning
+      - redis_data:/data
+      - ./backend/services/docker/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf --save 60 1 --loglevel warning
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -11,22 +14,26 @@ services:
       retries: 3
 
   rabbitmq:
-    image: rabbitmq:3-management-alpine
-    environment:
-      - RABBITMQ_DEFAULT_USER=suna
-      - RABBITMQ_DEFAULT_PASS=sunapassword
+    image: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
     volumes:
-      - rabbitmq-data:/var/lib/rabbitmq
+      - rabbitmq_data:/var/lib/rabbitmq
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
     environment:
       # IMPORTANT: Set to local (not production)
       - ENV_MODE=local
@@ -66,10 +73,10 @@ services:
       # Slack Configuration (Optional)
       - SLACK_CLIENT_ID=${SLACK_CLIENT_ID}
       - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET}
-      - SLACK_REDIRECT_URI=https://${BACKEND_DOMAIN}/api/integrations/slack/callback
+      - SLACK_REDIRECT_URI=https://${COOLIFY_FQDN}/api/integrations/slack/callback
       
       # Webhook Configuration - Use backend domain
-      - WEBHOOK_BASE_URL=https://${BACKEND_DOMAIN}
+      - WEBHOOK_BASE_URL=https://${COOLIFY_FQDN}
       
       # MCP Configuration
       - MCP_CREDENTIAL_ENCRYPTION_KEY=${MCP_CREDENTIAL_ENCRYPTION_KEY}
@@ -93,6 +100,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      worker:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
@@ -140,7 +149,7 @@ services:
       - QSTASH_NEXT_SIGNING_KEY=${QSTASH_NEXT_SIGNING_KEY}
       
       # Webhook Configuration
-      - WEBHOOK_BASE_URL=https://${BACKEND_DOMAIN}
+      - WEBHOOK_BASE_URL=https://${COOLIFY_FQDN}
       
       # MCP Configuration
       - MCP_CREDENTIAL_ENCRYPTION_KEY=${MCP_CREDENTIAL_ENCRYPTION_KEY}
@@ -161,19 +170,22 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    
       args:
         - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
         - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
         # IMPORTANT: Point to backend domain, not frontend domain
-        - NEXT_PUBLIC_BACKEND_URL=https://sunaback.hossamdev.net/api
+        - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000/api
         - NEXT_PUBLIC_URL=https://${COOLIFY_FQDN}
         - NEXT_PUBLIC_ENV_MODE=LOCAL
+    ports:
+      - "3000:3000"
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       # IMPORTANT: Point to backend domain
-      - NEXT_PUBLIC_BACKEND_URL=https://sunaback.hossamdev.net/api
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000/api
       - NEXT_PUBLIC_URL=https://${COOLIFY_FQDN}
       - NEXT_PUBLIC_ENV_MODE=LOCAL
     depends_on:
