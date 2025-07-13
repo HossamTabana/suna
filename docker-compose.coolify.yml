@@ -38,13 +38,22 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       
-      # CRITICAL CORS CONFIGURATION
+      # CRITICAL CORS CONFIGURATION - Handle all preflight requests
       - CORS_ORIGINS=*
       - CORS_ALLOW_CREDENTIALS=true
-      - CORS_ALLOW_METHODS=GET,POST,PUT,DELETE,OPTIONS,HEAD,PATCH
+      - CORS_ALLOW_METHODS=*
       - CORS_ALLOW_HEADERS=*
       - CORS_EXPOSE_HEADERS=*
       - CORS_MAX_AGE=86400
+      - CORS_PREFLIGHT_MAX_AGE=86400
+      - FASTAPI_CORS_ORIGINS=*
+      - FASTAPI_CORS_ALLOW_CREDENTIALS=true
+      - FASTAPI_CORS_ALLOW_METHODS=*
+      - FASTAPI_CORS_ALLOW_HEADERS=*
+      - ALLOW_ORIGINS=*
+      - ALLOW_METHODS=*
+      - ALLOW_HEADERS=*
+      - CORS_ENABLED=true
       
       # URLs
       - FRONTEND_URL=https://suna.hossamdev.net
