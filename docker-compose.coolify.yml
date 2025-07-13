@@ -150,7 +150,7 @@ services:
       - DAYTONA_SERVER_URL=https://app.daytona.io/api
       - DAYTONA_TARGET=us
       
-    command: ["dramatiq", "run_agent_background"]
+    command: ["uv", "run", "dramatiq", "run_agent_background"]
     depends_on:
       redis:
         condition: service_healthy
