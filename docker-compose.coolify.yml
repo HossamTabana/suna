@@ -34,10 +34,13 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       
-      # CORS Configuration
-      - CORS_ORIGINS=https://suna.hossamdev.net
+      # CORS Configuration - CRITICAL: Allow frontend domain
+      - CORS_ORIGINS=https://suna.hossamdev.net,http://localhost:3000
       - FRONTEND_URL=https://suna.hossamdev.net
       - BACKEND_URL=https://sunaback.hossamdev.net
+      
+      # Coolify SERVICE_FQDN - This tells Coolify to generate domain
+      - SERVICE_FQDN_BACKEND=https://sunaback.hossamdev.net
       
       # Supabase Configuration
       - SUPABASE_URL=${SUPABASE_URL}
@@ -104,6 +107,14 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    labels:
+      # Manual Traefik labels for backend service
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`sunaback.hossamdev.net`)"
+      - "traefik.http.routers.backend.entrypoints=https"
+      - "traefik.http.routers.backend.tls=true"
+      - "traefik.http.routers.backend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
 
   worker:
     build:
@@ -181,8 +192,20 @@ services:
       - NEXT_PUBLIC_BACKEND_URL=https://sunaback.hossamdev.net/api
       - NEXT_PUBLIC_URL=https://suna.hossamdev.net
       - NEXT_PUBLIC_ENV_MODE=LOCAL
+      
+      # Coolify SERVICE_FQDN - This tells Coolify to generate domain
+      - SERVICE_FQDN_FRONTEND=https://suna.hossamdev.net
+      
     depends_on:
       - backend
+    labels:
+      # Manual Traefik labels for frontend service
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`suna.hossamdev.net`)"
+      - "traefik.http.routers.frontend.entrypoints=https"
+      - "traefik.http.routers.frontend.tls=true"
+      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
 
 volumes:
   redis-data:
