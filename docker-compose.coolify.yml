@@ -28,8 +28,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      # Core Configuration
-      - ENV_MODE=production
+      # IMPORTANT: Set to local (not production)
+      - ENV_MODE=local
       
       # Supabase Configuration
       - SUPABASE_URL=${SUPABASE_URL}
@@ -66,10 +66,10 @@ services:
       # Slack Configuration (Optional)
       - SLACK_CLIENT_ID=${SLACK_CLIENT_ID}
       - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET}
-      - SLACK_REDIRECT_URI=https://${COOLIFY_FQDN}/api/integrations/slack/callback
+      - SLACK_REDIRECT_URI=https://${BACKEND_DOMAIN}/api/integrations/slack/callback
       
-      # Webhook Configuration
-      - WEBHOOK_BASE_URL=https://${COOLIFY_FQDN}
+      # Webhook Configuration - Use backend domain
+      - WEBHOOK_BASE_URL=https://${BACKEND_DOMAIN}
       
       # MCP Configuration
       - MCP_CREDENTIAL_ENCRYPTION_KEY=${MCP_CREDENTIAL_ENCRYPTION_KEY}
@@ -85,7 +85,7 @@ services:
       - DAYTONA_SERVER_URL=https://app.daytona.io/api
       - DAYTONA_TARGET=us
       
-      # Frontend URL for CORS
+      # Frontend URL for CORS - Use frontend domain
       - NEXT_PUBLIC_URL=https://${COOLIFY_FQDN}
       
     depends_on:
@@ -104,8 +104,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      # Core Configuration
-      - ENV_MODE=production
+      # IMPORTANT: Set to local (not production)
+      - ENV_MODE=local
       
       # Supabase Configuration
       - SUPABASE_URL=${SUPABASE_URL}
@@ -140,7 +140,7 @@ services:
       - QSTASH_NEXT_SIGNING_KEY=${QSTASH_NEXT_SIGNING_KEY}
       
       # Webhook Configuration
-      - WEBHOOK_BASE_URL=https://${COOLIFY_FQDN}
+      - WEBHOOK_BASE_URL=https://${BACKEND_DOMAIN}
       
       # MCP Configuration
       - MCP_CREDENTIAL_ENCRYPTION_KEY=${MCP_CREDENTIAL_ENCRYPTION_KEY}
@@ -164,16 +164,18 @@ services:
       args:
         - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
         - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-        - NEXT_PUBLIC_BACKEND_URL=https://${COOLIFY_FQDN}/api
+        # IMPORTANT: Point to backend domain, not frontend domain
+        - NEXT_PUBLIC_BACKEND_URL=https://sunaback.hossamdev.net/api
         - NEXT_PUBLIC_URL=https://${COOLIFY_FQDN}
-        - NEXT_PUBLIC_ENV_MODE=production
+        - NEXT_PUBLIC_ENV_MODE=LOCAL
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-      - NEXT_PUBLIC_BACKEND_URL=https://${COOLIFY_FQDN}/api
+      # IMPORTANT: Point to backend domain
+      - NEXT_PUBLIC_BACKEND_URL=https://sunaback.hossamdev.net/api
       - NEXT_PUBLIC_URL=https://${COOLIFY_FQDN}
-      - NEXT_PUBLIC_ENV_MODE=production
+      - NEXT_PUBLIC_ENV_MODE=LOCAL
     depends_on:
       - backend
 
