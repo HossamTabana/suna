@@ -27,8 +27,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     environment:
       - ENV_MODE=local
       - HOST=0.0.0.0
@@ -172,8 +172,8 @@ services:
         - NEXT_PUBLIC_BACKEND_URL=https://sunaback.hossamdev.net/api
         - NEXT_PUBLIC_URL=https://suna.hossamdev.net
         - NEXT_PUBLIC_ENV_MODE=LOCAL
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
