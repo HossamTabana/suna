@@ -1,12 +1,9 @@
 services:
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     volumes:
-      - redis_data:/data
-      - ./backend/services/docker/redis.conf:/usr/local/etc/redis/redis.conf:ro
-    command: redis-server /usr/local/etc/redis/redis.conf --save 60 1 --loglevel warning
+      - redis-data:/data
+    command: redis-server --save 60 1 --loglevel warning
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -14,96 +11,64 @@ services:
       retries: 3
 
   rabbitmq:
-    image: rabbitmq
-    ports:
-      - "5672:5672"
-      - "15672:15672"
+    image: rabbitmq:3-management-alpine
+    environment:
+      - RABBITMQ_DEFAULT_USER=suna
+      - RABBITMQ_DEFAULT_PASS=sunapassword
     volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    restart: unless-stopped
+      - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    ports:
-      - "9090:9090"
     environment:
-      # IMPORTANT: Set to local (not production)
       - ENV_MODE=local
-      
-      # Supabase Configuration
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-      
-      # Redis & RabbitMQ (using service names)
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
-      
-      # LLM API Keys
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - MODEL_TO_USE=${MODEL_TO_USE}
-      
-      # Search & Scraping APIs
       - TAVILY_API_KEY=${TAVILY_API_KEY}
       - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
       - FIRECRAWL_URL=${FIRECRAWL_URL}
-      
-      # Optional APIs
       - RAPID_API_KEY=${RAPID_API_KEY}
       - SMITHERY_API_KEY=${SMITHERY_API_KEY}
-      
-      # QStash Configuration (Required)
       - QSTASH_URL=https://qstash.upstash.io
       - QSTASH_TOKEN=${QSTASH_TOKEN}
       - QSTASH_CURRENT_SIGNING_KEY=${QSTASH_CURRENT_SIGNING_KEY}
       - QSTASH_NEXT_SIGNING_KEY=${QSTASH_NEXT_SIGNING_KEY}
-      
-      # Slack Configuration (Optional)
       - SLACK_CLIENT_ID=${SLACK_CLIENT_ID}
       - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET}
-      - SLACK_REDIRECT_URI=https://suna.hossamdev.net/api/integrations/slack/callback
-      
-      # Webhook Configuration - Use backend domain
-      - WEBHOOK_BASE_URL=https://suna.hossamdev.net
-      
-      # MCP Configuration
+      - SLACK_REDIRECT_URI=https://sunaback.hossamdev.net/api/integrations/slack/callback
+      - WEBHOOK_BASE_URL=https://sunaback.hossamdev.net
       - MCP_CREDENTIAL_ENCRYPTION_KEY=${MCP_CREDENTIAL_ENCRYPTION_KEY}
-      
-      # Pipedream Configuration (Optional)
       - PIPEDREAM_PROJECT_ID=${PIPEDREAM_PROJECT_ID}
       - PIPEDREAM_CLIENT_ID=${PIPEDREAM_CLIENT_ID}
       - PIPEDREAM_CLIENT_SECRET=${PIPEDREAM_CLIENT_SECRET}
       - PIPEDREAM_X_PD_ENVIRONMENT=${PIPEDREAM_X_PD_ENVIRONMENT}
-      
-      # Daytona Configuration
       - DAYTONA_API_KEY=${DAYTONA_API_KEY}
       - DAYTONA_SERVER_URL=https://app.daytona.io/api
       - DAYTONA_TARGET=us
-      
-      # Frontend URL for CORS - Use frontend domain
       - NEXT_PUBLIC_URL=https://suna.hossamdev.net
-      
     depends_on:
       redis:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      worker:
-        condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9090/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -113,52 +78,32 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      # IMPORTANT: Set to local (not production)
       - ENV_MODE=local
-      
-      # Supabase Configuration
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-      
-      # Redis & RabbitMQ
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
-      
-      # LLM API Keys
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - MODEL_TO_USE=${MODEL_TO_USE}
-      
-      # Search & Scraping APIs
       - TAVILY_API_KEY=${TAVILY_API_KEY}
       - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
       - FIRECRAWL_URL=${FIRECRAWL_URL}
-      
-      # Optional APIs
       - RAPID_API_KEY=${RAPID_API_KEY}
       - SMITHERY_API_KEY=${SMITHERY_API_KEY}
-      
-      # QStash Configuration
       - QSTASH_URL=https://qstash.upstash.io
       - QSTASH_TOKEN=${QSTASH_TOKEN}
       - QSTASH_CURRENT_SIGNING_KEY=${QSTASH_CURRENT_SIGNING_KEY}
       - QSTASH_NEXT_SIGNING_KEY=${QSTASH_NEXT_SIGNING_KEY}
-      
-      # Webhook Configuration
-      - WEBHOOK_BASE_URL=https://suna.hossamdev.net
-      
-      # MCP Configuration
+      - WEBHOOK_BASE_URL=https://sunaback.hossamdev.net
       - MCP_CREDENTIAL_ENCRYPTION_KEY=${MCP_CREDENTIAL_ENCRYPTION_KEY}
-      
-      # Daytona Configuration
       - DAYTONA_API_KEY=${DAYTONA_API_KEY}
       - DAYTONA_SERVER_URL=https://app.daytona.io/api
       - DAYTONA_TARGET=us
-      
     command: ["uv", "run", "dramatiq", "run_agent_background"]
     depends_on:
       redis:
@@ -170,22 +115,17 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    
       args:
         - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
         - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-        # IMPORTANT: Point to backend domain, not frontend domain
-        - NEXT_PUBLIC_BACKEND_URL=http://localhost:9090/api
+        - NEXT_PUBLIC_BACKEND_URL=https://sunaback.hossamdev.net/api
         - NEXT_PUBLIC_URL=https://suna.hossamdev.net
         - NEXT_PUBLIC_ENV_MODE=LOCAL
-    ports:
-      - "3080:3080"
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-      # IMPORTANT: Point to backend domain
-      - NEXT_PUBLIC_BACKEND_URL=http://localhost:9090/api
+      - NEXT_PUBLIC_BACKEND_URL=https://sunaback.hossamdev.net/api
       - NEXT_PUBLIC_URL=https://suna.hossamdev.net
       - NEXT_PUBLIC_ENV_MODE=LOCAL
     depends_on:
