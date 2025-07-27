@@ -57,6 +57,10 @@ export const StreamlinedInstallDialog: React.FC<StreamlinedInstallDialogProps> =
     item.mcp_requirements
       .filter(req => req.custom_type === 'pipedream')
       .forEach(req => {
+        const app_slug = req.qualified_name.startsWith('pipedream:') 
+          ? req.qualified_name.substring('pipedream:'.length)
+          : req.qualified_name;
+        
         steps.push({
           id: req.qualified_name,
           title: `Connect ${req.display_name}`,
@@ -64,7 +68,7 @@ export const StreamlinedInstallDialog: React.FC<StreamlinedInstallDialogProps> =
           type: 'pipedream_profile',
           service_name: req.display_name,
           qualified_name: req.qualified_name,
-          app_slug: req.qualified_name
+          app_slug: app_slug
         });
       });
 
@@ -329,22 +333,6 @@ export const StreamlinedInstallDialog: React.FC<StreamlinedInstallDialogProps> =
               </DialogDescription>
             </div>
           </div>
-
-          {setupSteps.length > 0 && (
-            <div className="flex items-center gap-2">
-              {setupSteps.map((_, index) => (
-                <div key={index} className={cn(
-                  "h-2 w-2 rounded-full",
-                  index <= currentStep ? 'bg-primary' : 'bg-muted'
-                )} />
-              ))}
-              <div className="h-px bg-muted flex-1" />
-              <div className={cn(
-                "h-2 w-2 rounded-full",
-                isOnFinalStep ? 'bg-primary' : 'bg-muted'
-              )} />
-            </div>
-          )}
         </DialogHeader>
 
         <div className="mt-6">

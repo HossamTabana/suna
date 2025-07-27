@@ -30,6 +30,7 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { usePipedreamProfiles, useCreatePipedreamProfile, useConnectPipedreamProfile } from '@/hooks/react-query/pipedream/use-pipedream-profiles';
+import { useUpdatePipedreamToolsForAgent } from '@/hooks/react-query/agents/use-pipedream-tools';
 import { pipedreamApi } from '@/hooks/react-query/pipedream/utils';
 import type { CreateProfileRequest } from '@/components/agents/pipedream/pipedream-types';
 import type { PipedreamApp } from '@/hooks/react-query/pipedream/utils';
@@ -40,6 +41,9 @@ interface PipedreamConnectorProps {
   onOpenChange: (open: boolean) => void;
   onComplete: (profileId: string, selectedTools: string[], appName: string, appSlug: string) => void;
   mode?: 'full' | 'profile-only';
+  saveMode?: 'direct' | 'callback';
+  agentId?: string;
+  existingProfileIds?: string[];
 }
 
 interface PipedreamTool {
@@ -52,7 +56,10 @@ export const PipedreamConnector: React.FC<PipedreamConnectorProps> = ({
   open,
   onOpenChange,
   onComplete,
-  mode = 'full'
+  mode = 'full',
+  saveMode = 'callback',
+  agentId,
+  existingProfileIds = []
 }) => {
   const [step, setStep] = useState<'profile' | 'tools'>('profile');
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
@@ -63,6 +70,9 @@ export const PipedreamConnector: React.FC<PipedreamConnectorProps> = ({
   const [isLoadingTools, setIsLoadingTools] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isCompletingConnection, setIsCompletingConnection] = useState(false);
+  const [connectionSuccessProfileId, setConnectionSuccessProfileId] = useState<string | null>(null);
+
+  const updatePipedreamTools = useUpdatePipedreamToolsForAgent();
 
   const { data: profiles, refetch: refetchProfiles } = usePipedreamProfiles({ app_slug: app.name_slug });
   const createProfile = useCreatePipedreamProfile();
@@ -71,10 +81,14 @@ export const PipedreamConnector: React.FC<PipedreamConnectorProps> = ({
   const connectedProfiles = useMemo(() => {
     return profiles?.filter(p => p.is_connected) || [];
   }, [profiles]);
-  
+
+  const availableProfiles = useMemo(() => {
+    return connectedProfiles.filter(p => !existingProfileIds.includes(p.profile_id));
+  }, [connectedProfiles, existingProfileIds]);
+
   const selectedProfile = useMemo(() => {
-    return profiles?.find(p => p.profile_id === selectedProfileId);
-  }, [profiles, selectedProfileId]);
+    return availableProfiles.find(p => p.profile_id === selectedProfileId);
+  }, [availableProfiles, selectedProfileId]);
 
   useEffect(() => {
     if (open) {
@@ -84,14 +98,15 @@ export const PipedreamConnector: React.FC<PipedreamConnectorProps> = ({
       setNewProfileName('');
       setSelectedTools(new Set());
       setTools([]);
+      setConnectionSuccessProfileId(null);
     }
   }, [open]);
 
   useEffect(() => {
-    if (open && connectedProfiles.length === 1 && !selectedProfileId) {
-      setSelectedProfileId(connectedProfiles[0].profile_id);
+    if (open && availableProfiles.length === 1 && !selectedProfileId) {
+      setSelectedProfileId(availableProfiles[0].profile_id);
     }
-  }, [open, connectedProfiles, selectedProfileId]);
+  }, [open, availableProfiles, selectedProfileId]);
 
   const handleCreateProfile = useCallback(async () => {
     if (!newProfileName.trim()) {
@@ -110,10 +125,10 @@ export const PipedreamConnector: React.FC<PipedreamConnectorProps> = ({
 
       const newProfile = await createProfile.mutateAsync(request);
       
-      // Connect the profile
       await connectProfile.mutateAsync({
         profileId: newProfile.profile_id,
         app: app.name_slug,
+        profileName: newProfile.profile_name,
       });
 
       await refetchProfiles();
@@ -157,21 +172,61 @@ export const PipedreamConnector: React.FC<PipedreamConnectorProps> = ({
     }
   }, [selectedProfileId, selectedProfile, app.name_slug]);
 
+  // Listen for connection success events
+  useEffect(() => {
+    const handleConnectionSuccess = (event: CustomEvent) => {
+      const { profileId, profileName } = event.detail;
+      setConnectionSuccessProfileId(profileId);
+      
+      // Auto-navigate to tools after successful connection
+      if (open && step === 'profile' && mode === 'full') {
+        setTimeout(() => {
+          setSelectedProfileId(profileId);
+          proceedToTools();
+        }, 1000); // Small delay to show the success state
+      }
+      
+      // Clear success state after 5 seconds
+      setTimeout(() => {
+        setConnectionSuccessProfileId(null);
+      }, 5000);
+    };
+
+    window.addEventListener('pipedream-connection-success', handleConnectionSuccess as EventListener);
+    return () => {
+      window.removeEventListener('pipedream-connection-success', handleConnectionSuccess as EventListener);
+    };
+  }, [open, step, mode, proceedToTools]);
+
   const handleComplete = useCallback(async () => {
     if (!selectedProfileId || selectedTools.size === 0) {
       toast.error('Please select at least one tool');
       return;
     }
+    
     setIsCompletingConnection(true);
     try {
-      onComplete(selectedProfileId, Array.from(selectedTools), app.name, app.name_slug);
-      onOpenChange(false);
+      if (saveMode === 'direct' && agentId) {
+        await updatePipedreamTools.mutateAsync({
+          agentId,
+          profileId: selectedProfileId,
+          enabledTools: Array.from(selectedTools)
+        });
+        toast.success(`Added ${selectedTools.size} tools from ${app.name}!`);
+        onOpenChange(false);
+      } else {
+        onComplete(selectedProfileId, Array.from(selectedTools), app.name, app.name_slug);
+        onOpenChange(false);
+      }
     } catch (error) {
       console.error('Error completing connection:', error);
+      if (saveMode === 'direct') {
+        toast.error('Failed to add tools. Please try again.');
+      }
     } finally {
       setIsCompletingConnection(false);
     }
-  }, [selectedProfileId, selectedTools, onComplete, app.name, app.name_slug, onOpenChange]);
+  }, [selectedProfileId, selectedTools, saveMode, agentId, updatePipedreamTools, onComplete, app.name, app.name_slug, onOpenChange]);
 
   const handleProfileOnlyComplete = useCallback(async () => {
     if (!selectedProfileId) {
@@ -226,12 +281,20 @@ export const PipedreamConnector: React.FC<PipedreamConnectorProps> = ({
         </p>
       </div>
 
-      {mode !== 'profile-only' && connectedProfiles.length > 0 && !isCreatingProfile && (
+      {mode !== 'profile-only' && availableProfiles.length > 0 && !isCreatingProfile && (
         <div className="space-y-4">
+          {connectionSuccessProfileId && (
+            <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+              <CheckCircle2 className="h-5 w-5 text-green-600" />
+              <span className="text-sm font-medium text-green-800">
+                {connectedProfiles.find(p => p.profile_id === connectionSuccessProfileId)?.profile_name} successfully connected!
+              </span>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="profile-select">Select Profile</Label>
             <Select value={selectedProfileId} onValueChange={setSelectedProfileId}>
-              <SelectTrigger>
+              <SelectTrigger className="w-full">
                 <SelectValue placeholder="Choose a profile">
                   {selectedProfile && (
                     <div className="flex items-center gap-2">
@@ -242,7 +305,7 @@ export const PipedreamConnector: React.FC<PipedreamConnectorProps> = ({
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {connectedProfiles.map((profile) => (
+                {availableProfiles.map((profile) => (
                   <SelectItem key={profile.profile_id} value={profile.profile_id}>
                     <div className="flex items-center gap-2">
                       <span>{profile.profile_name}</span>
@@ -271,7 +334,7 @@ export const PipedreamConnector: React.FC<PipedreamConnectorProps> = ({
         </div>
       )}
 
-      {(mode === 'profile-only' || connectedProfiles.length === 0 || isCreatingProfile) && (
+      {(mode === 'profile-only' || availableProfiles.length === 0 || isCreatingProfile) && (
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="profile-name">Profile Name</Label>
@@ -305,7 +368,7 @@ export const PipedreamConnector: React.FC<PipedreamConnectorProps> = ({
             >
               {isConnecting ? (
                 <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                   Creating...
                 </>
               ) : (
@@ -328,7 +391,7 @@ export const PipedreamConnector: React.FC<PipedreamConnectorProps> = ({
           >
             {isCompletingConnection ? (
               <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
                 Connecting...
               </>
             ) : (
@@ -355,7 +418,8 @@ export const PipedreamConnector: React.FC<PipedreamConnectorProps> = ({
     proceedToTools,
     mode,
     handleProfileOnlyComplete,
-    isCompletingConnection
+    isCompletingConnection,
+    availableProfiles
   ]);
 
   const ToolsStep = useMemo(() => (
@@ -449,7 +513,6 @@ export const PipedreamConnector: React.FC<PipedreamConnectorProps> = ({
               })}
             </div>
           </div>
-
           <div className="pt-4 border-t">
             <Button 
               onClick={handleComplete}
@@ -458,13 +521,16 @@ export const PipedreamConnector: React.FC<PipedreamConnectorProps> = ({
             >
               {isCompletingConnection ? (
                 <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Connecting...
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {saveMode === 'direct' ? 'Adding Tools...' : 'Connecting...'}
                 </>
               ) : (
                 <>
                   <Zap className="h-4 w-4" />
-                  Connect with {selectedTools.size} Tool{selectedTools.size !== 1 ? 's' : ''}
+                  {saveMode === 'direct' 
+                    ? `Add ${selectedTools.size} Tool${selectedTools.size !== 1 ? 's' : ''} to Agent`
+                    : `Connect with ${selectedTools.size} Tool${selectedTools.size !== 1 ? 's' : ''}`
+                  }
                 </>
               )}
             </Button>
@@ -508,22 +574,6 @@ export const PipedreamConnector: React.FC<PipedreamConnectorProps> = ({
                 }
               </DialogDescription>
             </div>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <div className={cn(
-              "h-2 w-2 rounded-full",
-              step === 'profile' ? 'bg-primary' : 'bg-muted'
-            )} />
-            {mode === 'full' && (
-              <>
-                <div className="h-px bg-muted flex-1" />
-                <div className={cn(
-                  "h-2 w-2 rounded-full",
-                  step === 'tools' ? 'bg-primary' : 'bg-muted'
-                )} />
-              </>
-            )}
           </div>
         </DialogHeader>
 

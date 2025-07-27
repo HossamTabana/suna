@@ -175,6 +175,8 @@ class Configuration:
     GROQ_API_KEY: Optional[str] = None
     OPENROUTER_API_KEY: Optional[str] = None
     XAI_API_KEY: Optional[str] = None
+    MORPH_API_KEY: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = None
     OPENROUTER_API_BASE: Optional[str] = "https://openrouter.ai/api/v1"
     OR_SITE_URL: Optional[str] = "https://kortix.ai"
     OR_APP_NAME: Optional[str] = "Kortix AI"    
@@ -222,6 +224,7 @@ class Configuration:
     
     # Sandbox configuration
     SANDBOX_IMAGE_NAME = "kortix/suna:0.1.3"
+    SANDBOX_SNAPSHOT_NAME = "kortix/suna:0.1.3"
     SANDBOX_ENTRYPOINT = "/usr/bin/supervisord -n -c /etc/supervisor/conf.d/supervisord.conf"
 
     # LangFuse configuration
@@ -230,7 +233,7 @@ class Configuration:
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
 
     # Admin API key for server-side operations
-    ADMIN_API_KEY: Optional[str] = None
+    KORTIX_ADMIN_API_KEY: Optional[str] = None
     
     @property
     def STRIPE_PRODUCT_ID(self) -> str:

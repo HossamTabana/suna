@@ -52,6 +52,7 @@ export default function ThreadPage({
   const [debugMode, setDebugMode] = useState(false);
   const [initialPanelOpenAttempted, setInitialPanelOpenAttempted] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string | undefined>(undefined);
+  const [isSidePanelAnimating, setIsSidePanelAnimating] = useState(false);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -509,8 +510,11 @@ export default function ThreadPage({
     setDebugMode(debugParam === 'true');
   }, [searchParams]);
 
+  const hasCheckedUpgradeDialog = useRef(false);
+
   useEffect(() => {
-    if (initialLoadCompleted && subscriptionData) {
+    if (initialLoadCompleted && subscriptionData && !hasCheckedUpgradeDialog.current) {
+      hasCheckedUpgradeDialog.current = true;
       const hasSeenUpgradeDialog = localStorage.getItem('suna_upgrade_dialog_displayed');
       const isFreeTier = subscriptionStatus === 'no_subscription';
       if (!hasSeenUpgradeDialog && isFreeTier && !isLocalMode()) {
@@ -529,6 +533,12 @@ export default function ThreadPage({
       handleStreamingToolCall(streamingToolCall);
     }
   }, [streamingToolCall, handleStreamingToolCall]);
+
+  useEffect(() => {
+    setIsSidePanelAnimating(true);
+    const timer = setTimeout(() => setIsSidePanelAnimating(false), 200); // Match transition duration
+    return () => clearTimeout(timer);
+  }, [isSidePanelOpen]);
 
   if (!initialLoadCompleted || isLoading) {
     return <ThreadSkeleton isSidePanelOpen={isSidePanelOpen} />;
@@ -613,13 +623,14 @@ export default function ThreadPage({
         isMobile={isMobile}
         initialLoadCompleted={initialLoadCompleted}
         agentName={agent && agent.name}
+        disableInitialAnimation={!initialLoadCompleted && toolCalls.length > 0}
       >
         {/* {workflowId && (
           <div className="px-4 pt-4">
             <WorkflowInfo workflowId={workflowId} />
           </div>
         )} */}
-        
+
         <ThreadContent
           messages={messages}
           streamingTextContent={streamingTextContent}
@@ -638,7 +649,8 @@ export default function ThreadPage({
 
         <div
           className={cn(
-            "fixed bottom-0 z-10 bg-gradient-to-t from-background via-background/90 to-transparent px-4 pt-8 transition-all duration-200 ease-in-out",
+            "fixed bottom-0 z-10 bg-gradient-to-t from-background via-background/90 to-transparent px-4 pt-8",
+            isSidePanelAnimating ? "" : "transition-all duration-200 ease-in-out",
             leftSidebarState === 'expanded' ? 'left-[72px] md:left-[256px]' : 'left-[72px]',
             isSidePanelOpen ? 'right-[90%] sm:right-[450px] md:right-[500px] lg:right-[550px] xl:right-[650px]' : 'right-0',
             isMobile ? 'left-0 right-0' : ''
@@ -670,6 +682,7 @@ export default function ThreadPage({
                 setIsSidePanelOpen(true);
                 userClosedPanelRef.current = false;
               }}
+              defaultShowSnackbar="tokens"
             />
           </div>
         </div>

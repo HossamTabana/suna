@@ -38,7 +38,7 @@ class LLMRetryError(LLMError):
 
 def setup_api_keys() -> None:
     """Set up API keys from environment variables."""
-    providers = ['OPENAI', 'ANTHROPIC', 'GROQ', 'OPENROUTER', 'XAI']
+    providers = ['OPENAI', 'ANTHROPIC', 'GROQ', 'OPENROUTER', 'XAI', 'MORPH', 'GEMINI']
     for provider in providers:
         key = getattr(config, f'{provider}_API_KEY')
         if key:
@@ -76,6 +76,7 @@ def get_openrouter_fallback(model_name: str) -> Optional[str]:
         "anthropic/claude-3-7-sonnet-latest": "openrouter/anthropic/claude-3.7-sonnet",
         "anthropic/claude-sonnet-4-20250514": "openrouter/anthropic/claude-sonnet-4",
         "xai/grok-4": "openrouter/x-ai/grok-4",
+        "gemini/gemini-2.5-pro": "openrouter/google/gemini-2.5-pro",
     }
     
     # Check for exact match first
@@ -232,6 +233,12 @@ def prepare_params(
     use_thinking = enable_thinking if enable_thinking is not None else False
     is_anthropic = "anthropic" in effective_model_name.lower() or "claude" in effective_model_name.lower()
     is_xai = "xai" in effective_model_name.lower() or model_name.startswith("xai/")
+    is_kimi_k2 = "kimi-k2" in effective_model_name.lower() or model_name.startswith("moonshotai/kimi-k2")
+
+    if is_kimi_k2:
+        params["provider"] = {
+            "order": ["together/fp8", "novita/fp8", "baseten/fp8", "moonshotai", "groq"]
+        }
 
     if is_anthropic and use_thinking:
         effort_level = reasoning_effort if reasoning_effort else 'low'

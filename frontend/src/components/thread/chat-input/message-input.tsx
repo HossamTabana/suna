@@ -16,6 +16,7 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { TooltipProvider, TooltipTrigger } from '@radix-ui/react-tooltip';
 import { BillingModal } from '@/components/billing/billing-modal';
 import ChatDropdown from './chat-dropdown';
+import { handleFiles } from './file-upload-handler';
 
 interface MessageInputProps {
   value: string;
@@ -50,6 +51,7 @@ interface MessageInputProps {
   onAgentSelect?: (agentId: string | undefined) => void;
   enableAdvancedConfig?: boolean;
   hideAgentSelection?: boolean;
+  isSunaAgent?: boolean;
 }
 
 export const MessageInput = forwardRef<HTMLTextAreaElement, MessageInputProps>(
@@ -88,6 +90,7 @@ export const MessageInput = forwardRef<HTMLTextAreaElement, MessageInputProps>(
       onAgentSelect,
       enableAdvancedConfig = false,
       hideAgentSelection = false,
+      isSunaAgent,
     },
     ref,
   ) => {
@@ -129,10 +132,33 @@ export const MessageInput = forwardRef<HTMLTextAreaElement, MessageInputProps>(
       }
     };
 
+    const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (!e.clipboardData) return;
+      const items = Array.from(e.clipboardData.items);
+      const imageFiles: File[] = [];
+      for (const item of items) {
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) imageFiles.push(file);
+        }
+      }
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        handleFiles(
+          imageFiles,
+          sandboxId,
+          setPendingFiles,
+          setUploadedFiles,
+          setIsUploading,
+          messages,
+        );
+      }
+    };
+
     const renderDropdown = () => {
       if (isLoggedIn) {
         const showAdvancedFeatures = enableAdvancedConfig || (customAgentsEnabled && !flagsLoading);
-        
+
         return (
           <div className="flex items-center gap-2">
             {showAdvancedFeatures && !hideAgentSelection && (
@@ -140,6 +166,7 @@ export const MessageInput = forwardRef<HTMLTextAreaElement, MessageInputProps>(
                 selectedAgentId={selectedAgentId}
                 onAgentSelect={onAgentSelect}
                 disabled={loading || (disabled && !isAgentRunning)}
+                isSunaAgent={isSunaAgent}
               />
             )}
             <ModelSelector
@@ -167,6 +194,7 @@ export const MessageInput = forwardRef<HTMLTextAreaElement, MessageInputProps>(
             value={value}
             onChange={onChange}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={placeholder}
             className={cn(
               'w-full bg-transparent dark:bg-transparent border-none shadow-none focus-visible:ring-0 px-0.5 pb-6 pt-4 !text-[15px] min-h-[36px] max-h-[200px] overflow-y-auto resize-none',
@@ -198,7 +226,7 @@ export const MessageInput = forwardRef<HTMLTextAreaElement, MessageInputProps>(
 
           </div>
 
-          {subscriptionStatus === 'no_subscription' && !isLocalMode() &&
+          {/* {subscriptionStatus === 'no_subscription' && !isLocalMode() &&
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger>
@@ -209,7 +237,7 @@ export const MessageInput = forwardRef<HTMLTextAreaElement, MessageInputProps>(
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
-          }
+          } */}
 
           <div className='flex items-center gap-2'>
             {renderDropdown()}
@@ -252,13 +280,13 @@ export const MessageInput = forwardRef<HTMLTextAreaElement, MessageInputProps>(
             </Button>
           </div>
         </div>
-        {subscriptionStatus === 'no_subscription' && !isLocalMode() &&
+        {/* {subscriptionStatus === 'no_subscription' && !isLocalMode() &&
           <div className='sm:hidden absolute -bottom-8 left-0 right-0 flex justify-center'>
             <p className='text-xs text-amber-500 px-2 py-1'>
               Upgrade for better performance
             </p>
           </div>
-        }
+        } */}
       </div>
     );
   },

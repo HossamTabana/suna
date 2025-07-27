@@ -4,16 +4,27 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DEFAULT_AGENTPRESS_TOOLS, getToolDisplayName } from './tools';
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 interface AgentToolsConfigurationProps {
   tools: Record<string, { enabled: boolean; description: string }>;
   onToolsChange: (tools: Record<string, { enabled: boolean; description: string }>) => void;
+  disabled?: boolean;
+  isSunaAgent?: boolean;
 }
 
-export const AgentToolsConfiguration = ({ tools, onToolsChange }: AgentToolsConfigurationProps) => {
+export const AgentToolsConfiguration = ({ tools, onToolsChange, disabled = false, isSunaAgent = false }: AgentToolsConfigurationProps) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const handleToolToggle = (toolName: string, enabled: boolean) => {
+    if (disabled && isSunaAgent) {
+      toast.error("Tools cannot be modified", {
+        description: "Suna's default tools are managed centrally and cannot be changed.",
+      });
+      return;
+    }
+    
     const updatedTools = {
       ...tools,
       [toolName]: {
@@ -49,17 +60,7 @@ export const AgentToolsConfiguration = ({ tools, onToolsChange }: AgentToolsConf
             {getSelectedToolsCount()} selected
           </span>
         </div>
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search tools..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10"
-          />
-        </div>
       </div>
-
       <div className="flex-1 overflow-y-auto">
         <div className="gap-4 grid grid-cols-1 md:grid-cols-2">
           {getFilteredTools().map(([toolName, toolInfo]) => (
@@ -79,6 +80,7 @@ export const AgentToolsConfiguration = ({ tools, onToolsChange }: AgentToolsConf
                     checked={tools[toolName]?.enabled || false}
                     onCheckedChange={(checked) => handleToolToggle(toolName, checked)}
                     className="flex-shrink-0"
+                    disabled={disabled}
                   />
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">

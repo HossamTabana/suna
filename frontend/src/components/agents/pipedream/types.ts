@@ -15,6 +15,13 @@ export interface PipedreamRegistryProps {
   showAgentSelector?: boolean;
   selectedAgentId?: string;
   onAgentChange?: (agentId: string | undefined) => void;
+  versionData?: {
+    configured_mcps?: any[];
+    custom_mcps?: any[];
+    system_prompt?: string;
+    agentpress_tools?: any;
+  };
+  versionId?: string;
 }
 
 export interface AppCardProps {
@@ -46,6 +53,8 @@ export interface PipedreamHeaderProps {
   showAgentSelector: boolean;
   currentAgentId?: string;
   onAgentChange?: (agentId: string | undefined) => void;
+  agentName?: string;
+  isSunaAgent?: boolean;
 }
 
 export interface ConnectedAppsSectionProps {
@@ -73,6 +82,8 @@ export interface AppsGridProps {
   onConnectApp?: (app: PipedreamApp) => void;
   onConfigureTools?: (profile: any) => void;
   onCategorySelect?: (category: string) => void;
+  onBrowseMore?: () => void;
+  onBackToPopular?: () => void;
 }
 
 export interface EmptyStateProps {

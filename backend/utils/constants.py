@@ -10,42 +10,57 @@ MODELS = {
         },
         "tier_availability": ["free", "paid"]
     },
-        
-    "openrouter/deepseek/deepseek-chat": {
-        "aliases": ["deepseek"],
+    # "openrouter/deepseek/deepseek-chat": {
+    #     "aliases": ["deepseek"],
+    #     "pricing": {
+    #         "input_cost_per_million_tokens": 0.38,
+    #         "output_cost_per_million_tokens": 0.89
+    #     },
+    #     "tier_availability": ["free", "paid"]
+    # },
+    # "openrouter/qwen/qwen3-235b-a22b": {
+    #     "aliases": ["qwen3"],
+    #     "pricing": {
+    #         "input_cost_per_million_tokens": 0.13,
+    #         "output_cost_per_million_tokens": 0.60
+    #     },
+    #     "tier_availability": ["free", "paid"]
+    # },
+    # "openrouter/google/gemini-2.5-flash-preview-05-20": {
+    #     "aliases": ["gemini-flash-2.5"],
+    #     "pricing": {
+    #         "input_cost_per_million_tokens": 0.15,
+    #         "output_cost_per_million_tokens": 0.60
+    #     },
+    #     "tier_availability": ["free", "paid"]
+    # },
+    # "openrouter/deepseek/deepseek-chat-v3-0324": {
+    #     "aliases": ["deepseek/deepseek-chat-v3-0324"],
+    #     "pricing": {
+    #         "input_cost_per_million_tokens": 0.38,
+    #         "output_cost_per_million_tokens": 0.89
+    #     },
+    #     "tier_availability": ["free", "paid"]
+    # },
+    "openrouter/moonshotai/kimi-k2": {
+        "aliases": ["moonshotai/kimi-k2"],
         "pricing": {
-            "input_cost_per_million_tokens": 0.38,
-            "output_cost_per_million_tokens": 0.89
+            "input_cost_per_million_tokens": 1.00,
+            "output_cost_per_million_tokens": 3.00
         },
         "tier_availability": ["free", "paid"]
     },
-    "openrouter/qwen/qwen3-235b-a22b": {
-        "aliases": ["qwen3"],
+    "xai/grok-4": {
+        "aliases": ["grok-4", "x-ai/grok-4"],
         "pricing": {
-            "input_cost_per_million_tokens": 0.13,
-            "output_cost_per_million_tokens": 0.60
-        },
-        "tier_availability": ["free", "paid"]
-    },
-    "openrouter/google/gemini-2.5-flash-preview-05-20": {
-        "aliases": ["gemini-flash-2.5"],
-        "pricing": {
-            "input_cost_per_million_tokens": 0.15,
-            "output_cost_per_million_tokens": 0.60
-        },
-        "tier_availability": ["free", "paid"]
-    },
-    
-    # Paid tier only models
-    "openrouter/deepseek/deepseek-chat-v3-0324": {
-        "aliases": ["deepseek/deepseek-chat-v3-0324"],
-        "pricing": {
-            "input_cost_per_million_tokens": 0.38,
-            "output_cost_per_million_tokens": 0.89
+            "input_cost_per_million_tokens": 5.00,
+            "output_cost_per_million_tokens": 15.00
         },
         "tier_availability": ["paid"]
     },
-    "openrouter/google/gemini-2.5-pro": {
+    
+    # Paid tier only models
+    "gemini/gemini-2.5-pro": {
         "aliases": ["google/gemini-2.5-pro"],
         "pricing": {
             "input_cost_per_million_tokens": 1.25,
@@ -92,17 +107,7 @@ MODELS = {
             "output_cost_per_million_tokens": 15.00
         },
         "tier_availability": ["paid"]
-    },
-    
-    "xai/grok-4": {
-        "aliases": ["grok-4", "x-ai/grok-4"],
-        "pricing": {
-            "input_cost_per_million_tokens": 5.00,
-            "output_cost_per_million_tokens": 15.00
-        },
-        "tier_availability": ["paid"]
-    },
-    
+    },   
 }
 
 # Derived structures (auto-generated from MODELS)
@@ -140,13 +145,17 @@ def _generate_model_structures():
         elif model_name.startswith("openrouter/qwen/"):
             legacy_name = model_name.replace("openrouter/", "")
             pricing[legacy_name] = config["pricing"]
-        elif model_name.startswith("openrouter/google/"):
-            legacy_name = model_name.replace("openrouter/", "")
+        elif model_name.startswith("gemini/"):
+            legacy_name = model_name.replace("gemini/", "")
             pricing[legacy_name] = config["pricing"]
         elif model_name.startswith("anthropic/"):
             # Add anthropic/claude-sonnet-4 alias for claude-sonnet-4-20250514
             if "claude-sonnet-4-20250514" in model_name:
                 pricing["anthropic/claude-sonnet-4"] = config["pricing"]
+        elif model_name.startswith("xai/"):
+            # Add pricing for OpenRouter x-ai models
+            openrouter_name = model_name.replace("xai/", "openrouter/x-ai/")
+            pricing[openrouter_name] = config["pricing"]
     
     return free_models, paid_models, aliases, pricing
 

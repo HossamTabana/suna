@@ -2,7 +2,7 @@ import json
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, BackgroundTasks
 from pydantic import BaseModel, Field, HttpUrl
-from utils.auth_utils import get_current_user_id_from_jwt
+from utils.auth_utils import get_current_user_id_from_jwt, verify_agent_access
 from services.supabase import DBConnection
 from knowledge_base.file_processor import FileProcessor
 from utils.logger import logger
@@ -51,12 +51,6 @@ class UpdateKnowledgeBaseEntryRequest(BaseModel):
     usage_context: Optional[str] = Field(None, pattern="^(always|on_request|contextual)$")
     is_active: Optional[bool] = None
 
-class GitRepositoryRequest(BaseModel):
-    git_url: HttpUrl
-    branch: str = "main"
-    include_patterns: Optional[List[str]] = None
-    exclude_patterns: Optional[List[str]] = None
-
 class ProcessingJobResponse(BaseModel):
     job_id: str
     job_type: str
@@ -71,115 +65,6 @@ class ProcessingJobResponse(BaseModel):
 
 db = DBConnection()
 
-@router.get("/threads/{thread_id}", response_model=KnowledgeBaseListResponse)
-async def get_thread_knowledge_base(
-    thread_id: str,
-    include_inactive: bool = False,
-    user_id: str = Depends(get_current_user_id_from_jwt)
-):
-    if not await is_enabled("knowledge_base"):
-        raise HTTPException(
-            status_code=403, 
-            detail="This feature is not available at the moment."
-        )
-    
-    """Get all knowledge base entries for a thread"""
-    try:
-        client = await db.client
-
-        thread_result = await client.table('threads').select('*').eq('thread_id', thread_id).execute()
-        if not thread_result.data:
-            raise HTTPException(status_code=404, detail="Thread not found")
-
-        result = await client.rpc('get_thread_knowledge_base', {
-            'p_thread_id': thread_id,
-            'p_include_inactive': include_inactive
-        }).execute()
-        
-        entries = []
-        total_tokens = 0
-        
-        for entry_data in result.data or []:
-            entry = KnowledgeBaseEntryResponse(
-                entry_id=entry_data['entry_id'],
-                name=entry_data['name'],
-                description=entry_data['description'],
-                content=entry_data['content'],
-                usage_context=entry_data['usage_context'],
-                is_active=entry_data['is_active'],
-                content_tokens=entry_data.get('content_tokens'),
-                created_at=entry_data['created_at'],
-                updated_at=entry_data.get('updated_at', entry_data['created_at'])
-            )
-            entries.append(entry)
-            total_tokens += entry_data.get('content_tokens', 0) or 0
-        
-        return KnowledgeBaseListResponse(
-            entries=entries,
-            total_count=len(entries),
-            total_tokens=total_tokens
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting knowledge base for thread {thread_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve knowledge base")
-
-@router.post("/threads/{thread_id}", response_model=KnowledgeBaseEntryResponse)
-async def create_knowledge_base_entry(
-    thread_id: str,
-    entry_data: CreateKnowledgeBaseEntryRequest,
-    user_id: str = Depends(get_current_user_id_from_jwt)
-):
-    if not await is_enabled("knowledge_base"):
-        raise HTTPException(
-            status_code=403, 
-            detail="This feature is not available at the moment."
-        )
-    
-    """Create a new knowledge base entry for a thread"""
-    try:
-        client = await db.client
-        thread_result = await client.table('threads').select('account_id').eq('thread_id', thread_id).execute()
-        if not thread_result.data:
-            raise HTTPException(status_code=404, detail="Thread not found")
-        
-        account_id = thread_result.data[0]['account_id']
-        
-        insert_data = {
-            'thread_id': thread_id,
-            'account_id': account_id,
-            'name': entry_data.name,
-            'description': entry_data.description,
-            'content': entry_data.content,
-            'usage_context': entry_data.usage_context
-        }
-        
-        result = await client.table('knowledge_base_entries').insert(insert_data).execute()
-        
-        if not result.data:
-            raise HTTPException(status_code=500, detail="Failed to create knowledge base entry")
-        
-        created_entry = result.data[0]
-        
-        return KnowledgeBaseEntryResponse(
-            entry_id=created_entry['entry_id'],
-            name=created_entry['name'],
-            description=created_entry['description'],
-            content=created_entry['content'],
-            usage_context=created_entry['usage_context'],
-            is_active=created_entry['is_active'],
-            content_tokens=created_entry.get('content_tokens'),
-            created_at=created_entry['created_at'],
-            updated_at=created_entry['updated_at']
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating knowledge base entry for thread {thread_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to create knowledge base entry")
 
 @router.get("/agents/{agent_id}", response_model=KnowledgeBaseListResponse)
 async def get_agent_knowledge_base(
@@ -197,9 +82,8 @@ async def get_agent_knowledge_base(
     try:
         client = await db.client
 
-        agent_result = await client.table('agents').select('*').eq('agent_id', agent_id).eq('account_id', user_id).execute()
-        if not agent_result.data:
-            raise HTTPException(status_code=404, detail="Agent not found or access denied")
+        # Verify agent access
+        await verify_agent_access(client, agent_id, user_id)
 
         result = await client.rpc('get_agent_knowledge_base', {
             'p_agent_id': agent_id,
@@ -256,11 +140,9 @@ async def create_agent_knowledge_base_entry(
     try:
         client = await db.client
         
-        agent_result = await client.table('agents').select('account_id').eq('agent_id', agent_id).eq('account_id', user_id).execute()
-        if not agent_result.data:
-            raise HTTPException(status_code=404, detail="Agent not found or access denied")
-        
-        account_id = agent_result.data[0]['account_id']
+        # Verify agent access and get agent data
+        agent_data = await verify_agent_access(client, agent_id, user_id)
+        account_id = agent_data['account_id']
         
         insert_data = {
             'agent_id': agent_id,
@@ -313,11 +195,9 @@ async def upload_file_to_agent_kb(
     try:
         client = await db.client
         
-        agent_result = await client.table('agents').select('account_id').eq('agent_id', agent_id).eq('account_id', user_id).execute()
-        if not agent_result.data:
-            raise HTTPException(status_code=404, detail="Agent not found or access denied")
-        
-        account_id = agent_result.data[0]['account_id']
+        # Verify agent access and get agent data
+        agent_data = await verify_agent_access(client, agent_id, user_id)
+        account_id = agent_data['account_id']
         
         file_content = await file.read()
         job_id = await client.rpc('create_agent_kb_processing_job', {
@@ -357,143 +237,6 @@ async def upload_file_to_agent_kb(
         logger.error(f"Error uploading file to agent {agent_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to upload file")
 
-
-@router.get("/agents/{agent_id}/processing-jobs", response_model=List[ProcessingJobResponse])
-async def get_agent_processing_jobs(
-    agent_id: str,
-    limit: int = 10,
-    user_id: str = Depends(get_current_user_id_from_jwt)
-):
-    if not await is_enabled("knowledge_base"):
-        raise HTTPException(
-            status_code=403, 
-            detail="This feature is not available at the moment."
-        )
-    
-    """Get processing jobs for an agent"""
-    try:
-        client = await db.client
-
-        agent_result = await client.table('agents').select('account_id').eq('agent_id', agent_id).eq('account_id', user_id).execute()
-        if not agent_result.data:
-            raise HTTPException(status_code=404, detail="Agent not found or access denied")
-        
-        result = await client.rpc('get_agent_kb_processing_jobs', {
-            'p_agent_id': agent_id,
-            'p_limit': limit
-        }).execute()
-        
-        jobs = []
-        for job_data in result.data or []:
-            job = ProcessingJobResponse(
-                job_id=job_data['job_id'],
-                job_type=job_data['job_type'],
-                status=job_data['status'],
-                source_info=job_data['source_info'],
-                result_info=job_data['result_info'],
-                entries_created=job_data['entries_created'],
-                total_files=job_data['total_files'],
-                created_at=job_data['created_at'],
-                completed_at=job_data.get('completed_at'),
-                error_message=job_data.get('error_message')
-            )
-            jobs.append(job)
-        
-        return jobs
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting processing jobs for agent {agent_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to get processing jobs")
-
-async def process_file_background(
-    job_id: str,
-    agent_id: str,
-    account_id: str,
-    file_content: bytes,
-    filename: str,
-    mime_type: str
-):
-    """Background task to process uploaded files"""
-    
-    processor = FileProcessor()
-    client = await processor.db.client
-    try:
-        await client.rpc('update_agent_kb_job_status', {
-            'p_job_id': job_id,
-            'p_status': 'processing'
-        }).execute()
-        
-        result = await processor.process_file_upload(
-            agent_id, account_id, file_content, filename, mime_type
-        )
-        
-        if result['success']:
-            await client.rpc('update_agent_kb_job_status', {
-                'p_job_id': job_id,
-                'p_status': 'completed',
-                'p_result_info': result,
-                'p_entries_created': 1,
-                'p_total_files': 1
-            }).execute()
-        else:
-            await client.rpc('update_agent_kb_job_status', {
-                'p_job_id': job_id,
-                'p_status': 'failed',
-                'p_error_message': result.get('error', 'Unknown error')
-            }).execute()
-            
-    except Exception as e:
-        logger.error(f"Error in background file processing for job {job_id}: {str(e)}")
-        try:
-            await client.rpc('update_agent_kb_job_status', {
-                'p_job_id': job_id,
-                'p_status': 'failed',
-                'p_error_message': str(e)
-            }).execute()
-        except:
-            pass
-
-
-@router.get("/agents/{agent_id}/context")
-async def get_agent_knowledge_base_context(
-    agent_id: str,
-    max_tokens: int = 4000,
-    user_id: str = Depends(get_current_user_id_from_jwt)
-):
-    if not await is_enabled("knowledge_base"):
-        raise HTTPException(
-            status_code=403, 
-            detail="This feature is not available at the moment."
-        )
-    
-    """Get knowledge base context for agent prompts"""
-    try:
-        client = await db.client
-        
-        agent_result = await client.table('agents').select('agent_id').eq('agent_id', agent_id).eq('account_id', user_id).execute()
-        if not agent_result.data:
-            raise HTTPException(status_code=404, detail="Agent not found or access denied")
-        
-        result = await client.rpc('get_agent_knowledge_base_context', {
-            'p_agent_id': agent_id,
-            'p_max_tokens': max_tokens
-        }).execute()
-        
-        context = result.data if result.data else None
-        
-        return {
-            "context": context,
-            "max_tokens": max_tokens,
-            "agent_id": agent_id
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting knowledge base context for agent {agent_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve agent knowledge base context")
 
 @router.put("/{entry_id}", response_model=KnowledgeBaseEntryResponse)
 async def update_knowledge_base_entry(
@@ -599,6 +342,7 @@ async def delete_knowledge_base_entry(
         logger.error(f"Error deleting knowledge base entry {entry_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to delete knowledge base entry")
 
+
 @router.get("/{entry_id}", response_model=KnowledgeBaseEntryResponse)
 async def get_knowledge_base_entry(
     entry_id: str,
@@ -645,9 +389,107 @@ async def get_knowledge_base_entry(
         logger.error(f"Error getting knowledge base entry {entry_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to retrieve knowledge base entry")
 
-@router.get("/threads/{thread_id}/context")
-async def get_knowledge_base_context(
-    thread_id: str,
+
+@router.get("/agents/{agent_id}/processing-jobs", response_model=List[ProcessingJobResponse])
+async def get_agent_processing_jobs(
+    agent_id: str,
+    limit: int = 10,
+    user_id: str = Depends(get_current_user_id_from_jwt)
+):
+    if not await is_enabled("knowledge_base"):
+        raise HTTPException(
+            status_code=403, 
+            detail="This feature is not available at the moment."
+        )
+    
+    """Get processing jobs for an agent"""
+    try:
+        client = await db.client
+
+        # Verify agent access
+        await verify_agent_access(client, agent_id, user_id)
+        
+        result = await client.rpc('get_agent_kb_processing_jobs', {
+            'p_agent_id': agent_id,
+            'p_limit': limit
+        }).execute()
+        
+        jobs = []
+        for job_data in result.data or []:
+            job = ProcessingJobResponse(
+                job_id=job_data['job_id'],
+                job_type=job_data['job_type'],
+                status=job_data['status'],
+                source_info=job_data['source_info'],
+                result_info=job_data['result_info'],
+                entries_created=job_data['entries_created'],
+                total_files=job_data['total_files'],
+                created_at=job_data['created_at'],
+                completed_at=job_data.get('completed_at'),
+                error_message=job_data.get('error_message')
+            )
+            jobs.append(job)
+        
+        return jobs
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting processing jobs for agent {agent_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get processing jobs")
+
+async def process_file_background(
+    job_id: str,
+    agent_id: str,
+    account_id: str,
+    file_content: bytes,
+    filename: str,
+    mime_type: str
+):
+    """Background task to process uploaded files"""
+    
+    processor = FileProcessor()
+    client = await processor.db.client
+    try:
+        await client.rpc('update_agent_kb_job_status', {
+            'p_job_id': job_id,
+            'p_status': 'processing'
+        }).execute()
+        
+        result = await processor.process_file_upload(
+            agent_id, account_id, file_content, filename, mime_type
+        )
+        
+        if result['success']:
+            await client.rpc('update_agent_kb_job_status', {
+                'p_job_id': job_id,
+                'p_status': 'completed',
+                'p_result_info': result,
+                'p_entries_created': 1,
+                'p_total_files': 1
+            }).execute()
+        else:
+            await client.rpc('update_agent_kb_job_status', {
+                'p_job_id': job_id,
+                'p_status': 'failed',
+                'p_error_message': result.get('error', 'Unknown error')
+            }).execute()
+            
+    except Exception as e:
+        logger.error(f"Error in background file processing for job {job_id}: {str(e)}")
+        try:
+            await client.rpc('update_agent_kb_job_status', {
+                'p_job_id': job_id,
+                'p_status': 'failed',
+                'p_error_message': str(e)
+            }).execute()
+        except:
+            pass
+
+
+@router.get("/agents/{agent_id}/context")
+async def get_agent_knowledge_base_context(
+    agent_id: str,
     max_tokens: int = 4000,
     user_id: str = Depends(get_current_user_id_from_jwt)
 ):
@@ -660,51 +502,11 @@ async def get_knowledge_base_context(
     """Get knowledge base context for agent prompts"""
     try:
         client = await db.client
-        thread_result = await client.table('threads').select('thread_id').eq('thread_id', thread_id).execute()
-        if not thread_result.data:
-            raise HTTPException(status_code=404, detail="Thread not found")
         
-        result = await client.rpc('get_knowledge_base_context', {
-            'p_thread_id': thread_id,
-            'p_max_tokens': max_tokens
-        }).execute()
+        # Verify agent access
+        await verify_agent_access(client, agent_id, user_id)
         
-        context = result.data if result.data else None
-        
-        return {
-            "context": context,
-            "max_tokens": max_tokens,
-            "thread_id": thread_id
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting knowledge base context for thread {thread_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve knowledge base context")
-
-@router.get("/threads/{thread_id}/combined-context")
-async def get_combined_knowledge_base_context(
-    thread_id: str,
-    agent_id: Optional[str] = None,
-    max_tokens: int = 4000,
-    user_id: str = Depends(get_current_user_id_from_jwt)
-):
-    if not await is_enabled("knowledge_base"):
-        raise HTTPException(
-            status_code=403, 
-            detail="This feature is not available at the moment."
-        )
-    
-    """Get combined knowledge base context from both thread and agent sources"""
-    try:
-        client = await db.client
-        thread_result = await client.table('threads').select('thread_id').eq('thread_id', thread_id).execute()
-        if not thread_result.data:
-            raise HTTPException(status_code=404, detail="Thread not found")
-        
-        result = await client.rpc('get_combined_knowledge_base_context', {
-            'p_thread_id': thread_id,
+        result = await client.rpc('get_agent_knowledge_base_context', {
             'p_agent_id': agent_id,
             'p_max_tokens': max_tokens
         }).execute()
@@ -714,12 +516,12 @@ async def get_combined_knowledge_base_context(
         return {
             "context": context,
             "max_tokens": max_tokens,
-            "thread_id": thread_id,
             "agent_id": agent_id
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting combined knowledge base context for thread {thread_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve combined knowledge base context") 
+        logger.error(f"Error getting knowledge base context for agent {agent_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve agent knowledge base context")
+
