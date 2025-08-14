@@ -3,6 +3,7 @@ import { ToolViewProps } from '../types';
 import { GenericToolView } from '../GenericToolView';
 import { BrowserToolView } from '../BrowserToolView';
 import { CommandToolView } from '../command-tool/CommandToolView';
+import { CheckCommandOutputToolView } from '../command-tool/CheckCommandOutputToolView';
 import { ExposePortToolView } from '../expose-port-tool/ExposePortToolView';
 import { FileOperationToolView } from '../file-operation/FileOperationToolView';
 import { FileEditToolView } from '../file-operation/FileEditToolView';
@@ -26,6 +27,8 @@ import { ConfigureProfileForAgentToolView } from '../configure-profile-for-agent
 import { GetCredentialProfilesToolView } from '../get-credential-profiles/get-credential-profiles';
 import { GetCurrentAgentConfigToolView } from '../get-current-agent-config/get-current-agent-config';
 import { TaskListToolView } from '../task-list/TaskListToolView';
+import { SheetsToolView } from '../sheets-tools/sheets-tool-view';
+import { GetProjectStructureView } from '../web-dev/GetProjectStructureView';
 
 
 export type ToolViewComponent = React.ComponentType<ToolViewProps>;
@@ -34,23 +37,12 @@ type ToolViewRegistryType = Record<string, ToolViewComponent>;
 
 const defaultRegistry: ToolViewRegistryType = {
   'browser-navigate-to': BrowserToolView,
-  'browser-go-back': BrowserToolView,
-  'browser-wait': BrowserToolView,
-  'browser-click-element': BrowserToolView,
-  'browser-input-text': BrowserToolView,
-  'browser-send-keys': BrowserToolView,
-  'browser-switch-tab': BrowserToolView,
-  'browser-close-tab': BrowserToolView,
-  'browser-scroll-down': BrowserToolView,
-  'browser-scroll-up': BrowserToolView,
-  'browser-scroll-to-text': BrowserToolView,
-  'browser-get-dropdown-options': BrowserToolView,
-  'browser-select-dropdown-option': BrowserToolView,
-  'browser-drag-drop': BrowserToolView,
-  'browser-click-coordinates': BrowserToolView,
+  'browser-act': BrowserToolView,
+  'browser-extract-content': BrowserToolView,
+  'browser-screenshot': BrowserToolView,
 
   'execute-command': CommandToolView,
-  'check-command-output': GenericToolView,
+  'check-command-output': CheckCommandOutputToolView,
   'terminate-command': TerminateCommandToolView,
   'list-commands': GenericToolView,
 
@@ -93,6 +85,16 @@ const defaultRegistry: ToolViewRegistryType = {
 
   'deploy': DeployToolView,
 
+  'create-sheet': SheetsToolView,
+  'update-sheet': SheetsToolView,
+  'view-sheet': SheetsToolView,
+  'analyze-sheet': SheetsToolView,
+  'visualize-sheet': SheetsToolView,
+  'format-sheet': SheetsToolView,
+
+  'get-project-structure': GetProjectStructureView,
+  'list-web-projects': GenericToolView,
+
   'default': GenericToolView,
 };
 
@@ -101,8 +103,7 @@ class ToolViewRegistry {
 
   constructor(initialRegistry: Partial<ToolViewRegistryType> = {}) {
     this.registry = { ...defaultRegistry };
-    
-    // Only add non-undefined values from initialRegistry
+
     Object.entries(initialRegistry).forEach(([key, value]) => {
       if (value !== undefined) {
         this.registry[key] = value;

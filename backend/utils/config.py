@@ -252,8 +252,8 @@ class Configuration:
     STRIPE_PRODUCT_ID_STAGING: str = 'prod_SCgIj3G7yPOAWY'
     
     # Sandbox configuration
-    SANDBOX_IMAGE_NAME = "kortix/suna:0.1.3"
-    SANDBOX_SNAPSHOT_NAME = "kortix/suna:0.1.3"
+    SANDBOX_IMAGE_NAME = "kortix/suna:0.1.3.1"
+    SANDBOX_SNAPSHOT_NAME = "kortix/suna:0.1.3.1"
     SANDBOX_ENTRYPOINT = "/usr/bin/supervisord -n -c /etc/supervisor/conf.d/supervisord.conf"
 
     # LangFuse configuration
@@ -267,7 +267,59 @@ class Configuration:
     # API Keys system configuration
     API_KEY_SECRET: str = "default-secret-key-change-in-production"
     API_KEY_LAST_USED_THROTTLE_SECONDS: int = 900
+    
+    # Agent execution limits (can be overridden via environment variable)
+    _MAX_PARALLEL_AGENT_RUNS_ENV: Optional[str] = None
+    
+    # Agent limits per billing tier
+    # Note: These limits are bypassed in local mode (ENV_MODE=local) where unlimited agents are allowed
+    AGENT_LIMITS = {
+        'free': 2,
+        'tier_2_20': 5,
+        'tier_6_50': 20,
+        'tier_12_100': 20,
+        'tier_25_200': 100,
+        'tier_50_400': 100,
+        'tier_125_800': 100,
+        'tier_200_1000': 100,
+        # Yearly plans have same limits as monthly
+        'tier_2_20_yearly': 5,
+        'tier_6_50_yearly': 20,
+        'tier_12_100_yearly': 20,
+        'tier_25_200_yearly': 100,
+        'tier_50_400_yearly': 100,
+        'tier_125_800_yearly': 100,
+        'tier_200_1000_yearly': 100,
+        # Yearly commitment plans
+        'tier_2_17_yearly_commitment': 5,
+        'tier_6_42_yearly_commitment': 20,
+        'tier_25_170_yearly_commitment': 100,
+    }
 
+    @property
+    def MAX_PARALLEL_AGENT_RUNS(self) -> int:
+        """
+        Get the maximum parallel agent runs limit.
+        
+        Can be overridden via MAX_PARALLEL_AGENT_RUNS environment variable.
+        Defaults:
+        - Production: 3
+        - Local/Staging: 999999 (effectively infinite)
+        """
+        # Check for environment variable override first
+        if self._MAX_PARALLEL_AGENT_RUNS_ENV is not None:
+            try:
+                return int(self._MAX_PARALLEL_AGENT_RUNS_ENV)
+            except ValueError:
+                logger.warning(f"Invalid MAX_PARALLEL_AGENT_RUNS value: {self._MAX_PARALLEL_AGENT_RUNS_ENV}, using default")
+        
+        # Environment-based defaults
+        if self.ENV_MODE == EnvMode.PRODUCTION:
+            return 3
+        else:
+            # Local and staging: effectively infinite
+            return 999999
+    
     @property
     def STRIPE_PRODUCT_ID(self) -> str:
         if self.ENV_MODE == EnvMode.STAGING:
@@ -317,6 +369,11 @@ class Configuration:
                 else:
                     # String or other type
                     setattr(self, key, env_val)
+        
+        # Custom handling for environment-dependent properties
+        max_parallel_runs_env = os.getenv("MAX_PARALLEL_AGENT_RUNS")
+        if max_parallel_runs_env is not None:
+            self._MAX_PARALLEL_AGENT_RUNS_ENV = max_parallel_runs_env
     
     def _validate(self):
         """Validate configuration based on type hints."""

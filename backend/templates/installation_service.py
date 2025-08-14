@@ -107,6 +107,9 @@ class InstallationService:
         
         await self._increment_download_count(template.template_id)
         
+        from utils.cache import Cache
+        await Cache.invalidate(f"agent_count_limit:{request.account_id}")
+        
         agent_name = request.instance_name or f"{template.name} (from marketplace)"
         logger.info(f"Successfully installed template {template.template_id} as agent {agent_id}")
         
@@ -181,7 +184,9 @@ class InstallationService:
                         'display_name': req.display_name,
                         'required_config': req.required_config,
                         'custom_type': req.custom_type,
-                        'field_descriptions': field_descriptions
+                        'field_descriptions': field_descriptions,
+                        'toolkit_slug': req.toolkit_slug,
+                        'app_slug': req.app_slug
                     })
             else:
                 if req.qualified_name not in profile_mappings:
@@ -189,7 +194,10 @@ class InstallationService:
                         'qualified_name': req.qualified_name,
                         'display_name': req.display_name,
                         'enabled_tools': req.enabled_tools,
-                        'required_config': req.required_config
+                        'required_config': req.required_config,
+                        'custom_type': req.custom_type,
+                        'toolkit_slug': req.toolkit_slug,
+                        'app_slug': req.app_slug
                     })
         
         return missing_profiles, missing_configs
@@ -215,7 +223,8 @@ class InstallationService:
                 'custom_mcp': []
             },
             'metadata': template.config.get('metadata', {}),
-            'system_prompt': request.custom_system_prompt or template.system_prompt
+            'system_prompt': request.custom_system_prompt or template.system_prompt,
+            'model': template.config.get('model')
         }
         
         from credentials import get_profile_service
@@ -244,7 +253,9 @@ class InstallationService:
                     profile = await profile_service.get_profile(request.account_id, profile_id)
                     if profile:
                         if req.qualified_name.startswith('pipedream:'):
-                            app_slug = profile.config.get('app_slug', req.qualified_name.split(':')[1])
+                            app_slug = req.app_slug or profile.config.get('app_slug')
+                            if not app_slug:
+                                app_slug = req.qualified_name.split(':')[1] if ':' in req.qualified_name else req.display_name.lower()
                             
                             pipedream_config = {
                                 'url': 'https://remote.mcp.pipedream.net',
@@ -261,6 +272,28 @@ class InstallationService:
                                 'enabledTools': req.enabled_tools
                             }
                             agent_config['tools']['custom_mcp'].append(mcp_config)
+                            
+                        elif req.qualified_name.startswith('composio.') or 'composio' in req.qualified_name:
+                            toolkit_slug = req.toolkit_slug
+                            if not toolkit_slug:
+                                toolkit_slug = req.qualified_name
+                                if toolkit_slug.startswith('composio.'):
+                                    toolkit_slug = toolkit_slug[9:]
+                                elif 'composio_' in toolkit_slug:
+                                    parts = toolkit_slug.split('composio_')
+                                    toolkit_slug = parts[-1]
+                            
+                            composio_config = {
+                                'name': req.display_name,
+                                'type': 'composio',
+                                'qualifiedName': req.qualified_name,
+                                'toolkit_slug': toolkit_slug,
+                                'config': {
+                                    'profile_id': profile_id
+                                },
+                                'enabledTools': req.enabled_tools
+                            }
+                            agent_config['tools']['custom_mcp'].append(composio_config)
                         else:
                             mcp_config = {
                                 'name': req.display_name or req.qualified_name,
@@ -290,6 +323,7 @@ class InstallationService:
             'description': template.description,
             'avatar': template.avatar,
             'avatar_color': template.avatar_color,
+            'profile_image_url': template.profile_image_url,
             'metadata': {
                 **template.metadata,
                 'created_from_template': template.template_id,
@@ -316,6 +350,7 @@ class InstallationService:
             configured_mcps = tools.get('mcp', [])
             custom_mcps = tools.get('custom_mcp', [])
             agentpress_tools = tools.get('agentpress', {})
+            model = agent_config.get('model')
             
             from agent.versioning.version_service import get_version_service
             version_service = await get_version_service()
@@ -323,6 +358,7 @@ class InstallationService:
                 agent_id=agent_id,
                 user_id=user_id,
                 system_prompt=system_prompt,
+                model=model,
                 configured_mcps=configured_mcps,
                 custom_mcps=custom_mcps,
                 agentpress_tools=agentpress_tools,

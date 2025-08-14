@@ -53,7 +53,6 @@ async def lifespan(app: FastAPI):
             instance_id
         )
         
-        # Workflows are now initialized via triggers module
         
         sandbox_api.initialize(db)
         
@@ -73,6 +72,7 @@ async def lifespan(app: FastAPI):
         pipedream_api.initialize(db)
         credentials_api.initialize(db)
         template_api.initialize(db)
+        composio_api.initialize(db)
         
         yield
         
@@ -187,6 +187,9 @@ api_router.include_router(pipedream_api.router)
 
 from admin import api as admin_api
 api_router.include_router(admin_api.router)
+
+from composio_integration import api as composio_api
+api_router.include_router(composio_api.router)
 
 @api_router.get("/health")
 async def health_check():

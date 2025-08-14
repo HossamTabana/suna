@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import datetime
 from typing import Optional, Dict, List, Any, AsyncGenerator
 from dataclasses import dataclass
 
@@ -16,7 +17,6 @@ from agentpress.thread_manager import ThreadManager
 from agentpress.response_processor import ProcessorConfig
 from agent.tools.sb_shell_tool import SandboxShellTool
 from agent.tools.sb_files_tool import SandboxFilesTool
-from agent.tools.sb_browser_tool import SandboxBrowserTool
 from agent.tools.data_providers_tool import DataProvidersTool
 from agent.tools.expand_msg_tool import ExpandMessageTool
 from agent.prompt import get_system_prompt
@@ -32,6 +32,8 @@ from agent.gemini_prompt import get_gemini_system_prompt
 from agent.tools.mcp_tool_wrapper import MCPToolWrapper
 from agent.tools.task_list_tool import TaskListTool
 from agentpress.tool import SchemaType
+from agent.tools.sb_sheets_tool import SandboxSheetsTool
+from agent.tools.sb_web_dev_tool import SandboxWebDevTool
 
 load_dotenv()
 
@@ -65,15 +67,22 @@ class ToolManager:
         
         self.thread_manager.add_tool(SandboxShellTool, project_id=self.project_id, thread_manager=self.thread_manager)
         self.thread_manager.add_tool(SandboxFilesTool, project_id=self.project_id, thread_manager=self.thread_manager)
-        self.thread_manager.add_tool(SandboxBrowserTool, project_id=self.project_id, thread_id=self.thread_id, thread_manager=self.thread_manager)
         self.thread_manager.add_tool(SandboxDeployTool, project_id=self.project_id, thread_manager=self.thread_manager)
         self.thread_manager.add_tool(SandboxExposeTool, project_id=self.project_id, thread_manager=self.thread_manager)
         self.thread_manager.add_tool(SandboxWebSearchTool, project_id=self.project_id, thread_manager=self.thread_manager)
         self.thread_manager.add_tool(SandboxVisionTool, project_id=self.project_id, thread_id=self.thread_id, thread_manager=self.thread_manager)
         self.thread_manager.add_tool(SandboxImageEditTool, project_id=self.project_id, thread_id=self.thread_id, thread_manager=self.thread_manager)
         self.thread_manager.add_tool(TaskListTool, project_id=self.project_id, thread_manager=self.thread_manager, thread_id=self.thread_id)
+        self.thread_manager.add_tool(SandboxSheetsTool, project_id=self.project_id, thread_manager=self.thread_manager)
+        # self.thread_manager.add_tool(SandboxWebDevTool, project_id=self.project_id, thread_id=self.thread_id, thread_manager=self.thread_manager)
         if config.RAPID_API_KEY:
             self.thread_manager.add_tool(DataProvidersTool)
+        
+
+        
+        # Add Browser Tool
+        from agent.tools.browser_tool import BrowserTool
+        self.thread_manager.add_tool(BrowserTool, project_id=self.project_id, thread_id=self.thread_id, thread_manager=self.thread_manager)
     
     def register_agent_builder_tools(self, agent_id: str):
         from agent.tools.agent_builder_tools.agent_config_tool import AgentConfigTool
@@ -110,8 +119,6 @@ class ToolManager:
             self.thread_manager.add_tool(SandboxShellTool, project_id=self.project_id, thread_manager=self.thread_manager)
         if safe_tool_check('sb_files_tool'):
             self.thread_manager.add_tool(SandboxFilesTool, project_id=self.project_id, thread_manager=self.thread_manager)
-        if safe_tool_check('sb_browser_tool'):
-            self.thread_manager.add_tool(SandboxBrowserTool, project_id=self.project_id, thread_id=self.thread_id, thread_manager=self.thread_manager)
         if safe_tool_check('sb_deploy_tool'):
             self.thread_manager.add_tool(SandboxDeployTool, project_id=self.project_id, thread_manager=self.thread_manager)
         if safe_tool_check('sb_expose_tool'):
@@ -120,8 +127,17 @@ class ToolManager:
             self.thread_manager.add_tool(SandboxWebSearchTool, project_id=self.project_id, thread_manager=self.thread_manager)
         if safe_tool_check('sb_vision_tool'):
             self.thread_manager.add_tool(SandboxVisionTool, project_id=self.project_id, thread_id=self.thread_id, thread_manager=self.thread_manager)
+        if safe_tool_check('sb_sheets_tool'):
+            self.thread_manager.add_tool(SandboxSheetsTool, project_id=self.project_id, thread_manager=self.thread_manager)
+        # if safe_tool_check('sb_web_dev_tool'):
+        #     self.thread_manager.add_tool(SandboxWebDevTool, project_id=self.project_id, thread_id=self.thread_id, thread_manager=self.thread_manager)
         if config.RAPID_API_KEY and safe_tool_check('data_providers_tool'):
             self.thread_manager.add_tool(DataProvidersTool)
+
+        
+        if safe_tool_check('browser_tool'):
+            from agent.tools.browser_tool import BrowserTool
+            self.thread_manager.add_tool(BrowserTool, project_id=self.project_id, thread_id=self.thread_id, thread_manager=self.thread_manager)
 
 
 class MCPManager:
@@ -159,6 +175,23 @@ class MCPManager:
                     if 'headers' in custom_mcp['config'] and 'x-pd-app-slug' in custom_mcp['config']['headers']:
                         custom_mcp['config']['app_slug'] = custom_mcp['config']['headers']['x-pd-app-slug']
                 
+                elif custom_type == 'composio':
+                    qualified_name = custom_mcp.get('qualifiedName')
+                    if not qualified_name:
+                        qualified_name = f"composio.{custom_mcp['name'].replace(' ', '_').lower()}"
+                    
+                    mcp_config = {
+                        'name': custom_mcp['name'],
+                        'qualifiedName': qualified_name,
+                        'config': custom_mcp.get('config', {}),
+                        'enabledTools': custom_mcp.get('enabledTools', []),
+                        'instructions': custom_mcp.get('instructions', ''),
+                        'isCustom': True,
+                        'customType': 'composio'
+                    }
+                    all_mcps.append(mcp_config)
+                    continue
+                
                 mcp_config = {
                     'name': custom_mcp['name'],
                     'qualifiedName': f"custom_{custom_type}_{custom_mcp['name'].replace(' ', '_').lower()}",
@@ -185,6 +218,7 @@ class MCPManager:
                         "schema": schema
                     }
             
+            logger.info(f"⚡ Registered {len(updated_schemas)} MCP tools (Redis cache enabled)")
             return mcp_wrapper_instance
         except Exception as e:
             logger.error(f"Failed to initialize MCP tools: {e}")
@@ -215,26 +249,6 @@ class PromptManager:
         else:
             system_content = default_system_content
         
-        if await is_enabled("knowledge_base"):
-            try:
-                from services.supabase import DBConnection
-                kb_db = DBConnection()
-                kb_client = await kb_db.client
-                
-                current_agent_id = agent_config.get('agent_id') if agent_config else None
-                
-                kb_result = await kb_client.rpc('get_combined_knowledge_base_context', {
-                    'p_thread_id': thread_id,
-                    'p_agent_id': current_agent_id,
-                    'p_max_tokens': 4000
-                }).execute()
-                
-                if kb_result.data and kb_result.data.strip():
-                    system_content += "\n\n" + kb_result.data
-                        
-            except Exception as e:
-                logger.error(f"Error retrieving knowledge base context for thread {thread_id}: {e}")
-
         if agent_config and (agent_config.get('configured_mcps') or agent_config.get('custom_mcps')) and mcp_wrapper_instance and mcp_wrapper_instance._initialized:
             mcp_info = "\n\n--- MCP Tools Available ---\n"
             mcp_info += "You have access to external MCP (Model Context Protocol) server tools.\n"
@@ -279,6 +293,17 @@ class PromptManager:
             mcp_info += "NEVER supplement MCP results with your training data or make assumptions beyond what the tools provide.\n"
             
             system_content += mcp_info
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        datetime_info = f"\n\n=== CURRENT DATE/TIME INFORMATION ===\n"
+        datetime_info += f"Today's date: {now.strftime('%A, %B %d, %Y')}\n"
+        datetime_info += f"Current UTC time: {now.strftime('%H:%M:%S UTC')}\n"
+        datetime_info += f"Current year: {now.strftime('%Y')}\n"
+        datetime_info += f"Current month: {now.strftime('%B')}\n"
+        datetime_info += f"Current day: {now.strftime('%A')}\n"
+        datetime_info += "Use this information for any time-sensitive tasks, research, or when current date/time context is needed.\n"
+        
+        system_content += datetime_info
 
         return {"role": "system", "content": system_content}
 
@@ -388,7 +413,10 @@ class AgentRunner:
         project_data = project.data[0]
         sandbox_info = project_data.get('sandbox', {})
         if not sandbox_info.get('id'):
-            raise ValueError(f"No sandbox found for project {self.config.project_id}")
+            # Sandbox is created lazily by tools when required. Do not fail setup
+            # if no sandbox is present — tools will call `_ensure_sandbox()`
+            # which will create and persist the sandbox metadata when needed.
+            logger.info(f"No sandbox found for project {self.config.project_id}; will create lazily when needed")
     
     async def setup_tools(self):
         tool_manager = ToolManager(self.thread_manager, self.config.project_id, self.config.thread_id)
@@ -632,13 +660,22 @@ async def run_agent(
     is_agent_builder: Optional[bool] = False,
     target_agent_id: Optional[str] = None
 ):
+    effective_model = model_name
+    if model_name == "anthropic/claude-sonnet-4-20250514" and agent_config and agent_config.get('model'):
+        effective_model = agent_config['model']
+        logger.info(f"Using model from agent config: {effective_model} (no user selection)")
+    elif model_name != "anthropic/claude-sonnet-4-20250514":
+        logger.info(f"Using user-selected model: {effective_model}")
+    else:
+        logger.info(f"Using default model: {effective_model}")
+    
     config = AgentConfig(
         thread_id=thread_id,
         project_id=project_id,
         stream=stream,
         native_max_auto_continues=native_max_auto_continues,
         max_iterations=max_iterations,
-        model_name=model_name,
+        model_name=effective_model,
         enable_thinking=enable_thinking,
         reasoning_effort=reasoning_effort,
         enable_context_manager=enable_context_manager,

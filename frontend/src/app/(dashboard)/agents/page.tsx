@@ -12,7 +12,6 @@ import { useAuth } from '@/components/AuthProvider';
 import { StreamlinedInstallDialog } from '@/components/agents/installation/streamlined-install-dialog';
 import type { MarketplaceTemplate } from '@/components/agents/installation/types';
 
-import { getAgentAvatar } from '../../../lib/utils/get-agent-style';
 import { AgentsParams } from '@/hooks/react-query/agents/utils';
 
 import { AgentsPageHeader } from '@/components/agents/custom-agents-page/header';
@@ -22,7 +21,9 @@ import { MarketplaceTab } from '@/components/agents/custom-agents-page/marketpla
 import { PublishDialog } from '@/components/agents/custom-agents-page/publish-dialog';
 import { LoadingSkeleton } from '@/components/agents/custom-agents-page/loading-skeleton';
 import { NewAgentDialog } from '@/components/agents/new-agent-dialog';
-
+import { MarketplaceAgentPreviewDialog } from '@/components/agents/marketplace-agent-preview-dialog';
+import { AgentCountLimitDialog } from '@/components/agents/agent-count-limit-dialog';
+import { AgentCountLimitError } from '@/lib/api';
 
 type ViewMode = 'grid' | 'list';
 type AgentSortOption = 'name' | 'created_at' | 'updated_at' | 'tools_count';
@@ -78,6 +79,7 @@ export default function AgentsPage() {
   const [installingItemId, setInstallingItemId] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<MarketplaceTemplate | null>(null);
   const [showInstallDialog, setShowInstallDialog] = useState(false);
+  const [showPreviewDialog, setShowPreviewDialog] = useState(false);
   const [marketplaceFilter, setMarketplaceFilter] = useState<'all' | 'kortix' | 'community' | 'mine'>('all');
 
   const [templatesActioningId, setTemplatesActioningId] = useState<string | null>(null);
@@ -85,6 +87,8 @@ export default function AgentsPage() {
 
   const [publishingAgentId, setPublishingAgentId] = useState<string | null>(null);
   const [showNewAgentDialog, setShowNewAgentDialog] = useState(false);
+  const [showAgentLimitDialog, setShowAgentLimitDialog] = useState(false);
+  const [agentLimitError, setAgentLimitError] = useState<AgentCountLimitError | null>(null);
 
   const activeTab = useMemo(() => {
     return searchParams.get('tab') || 'my-agents';
@@ -125,6 +129,8 @@ export default function AgentsPage() {
   const { data: agentsResponse, isLoading: agentsLoading, error: agentsError, refetch: loadAgents } = useAgents(agentsQueryParams);
   const { data: marketplaceTemplates, isLoading: marketplaceLoading } = useMarketplaceTemplates(marketplaceQueryParams);
   const { data: myTemplates, isLoading: templatesLoading, error: templatesError } = useMyTemplates();
+
+  console.log(marketplaceTemplates);
   
   const updateAgentMutation = useUpdateAgent();
   const { optimisticallyUpdateAgent, revertOptimisticUpdate } = useOptimisticAgentUpdate();
@@ -145,7 +151,6 @@ export default function AgentsPage() {
 
     if (marketplaceTemplates) {
       marketplaceTemplates.forEach(template => {
-
         const item: MarketplaceTemplate = {
           id: template.template_id,
           creator_id: template.creator_id,
@@ -156,21 +161,28 @@ export default function AgentsPage() {
           creator_name: template.creator_name || 'Anonymous',
           created_at: template.created_at,
           marketplace_published_at: template.marketplace_published_at,
-          avatar: template.avatar,
-          avatar_color: template.avatar_color,
+          profile_image_url: template.profile_image_url,
           template_id: template.template_id,
           is_kortix_team: template.is_kortix_team,
           mcp_requirements: template.mcp_requirements,
           metadata: template.metadata,
         };
 
-        // Always add user's own templates to mineItems for the "mine" filter
+        const matchesSearch = !marketplaceSearchQuery.trim() || (() => {
+          const searchLower = marketplaceSearchQuery.toLowerCase();
+          return item.name.toLowerCase().includes(searchLower) ||
+                 item.description?.toLowerCase().includes(searchLower) ||
+                 item.tags.some(tag => tag.toLowerCase().includes(searchLower)) ||
+                 item.creator_name?.toLowerCase().includes(searchLower);
+        })();
+
+        if (!matchesSearch) return;
+
         if (user?.id === template.creator_id) {
           mineItems.push(item);
         }
         
-        // Categorize all templates (including user's own) for the "all" view
-        if (template.is_kortix_team) {
+        if (template.is_kortix_team === true) {
           kortixItems.push(item);
         } else {
           communityItems.push(item);
@@ -178,8 +190,8 @@ export default function AgentsPage() {
       });
     }
 
-    const sortItems = (items: MarketplaceTemplate[]) => {
-      return items.sort((a, b) => {
+    const sortItems = (items: MarketplaceTemplate[]) =>
+      items.sort((a, b) => {
         switch (marketplaceSortBy) {
           case 'newest':
             return new Date(b.marketplace_published_at || b.created_at).getTime() - 
@@ -193,14 +205,13 @@ export default function AgentsPage() {
             return 0;
         }
       });
-    };
 
     return {
       kortixTeamItems: sortItems(kortixItems),
       communityItems: sortItems(communityItems),
       mineItems: sortItems(mineItems)
     };
-  }, [marketplaceTemplates, marketplaceSortBy, user?.id]);
+  }, [marketplaceTemplates, marketplaceSortBy, user?.id, marketplaceSearchQuery]);
 
   const allMarketplaceItems = useMemo(() => {
     if (marketplaceFilter === 'kortix') {
@@ -238,6 +249,18 @@ export default function AgentsPage() {
   useEffect(() => {
     setMarketplacePage(1);
   }, [marketplaceSearchQuery, marketplaceSelectedTags, marketplaceSortBy]);
+
+  // Handle shared agent URL parameter
+  useEffect(() => {
+    const agentId = searchParams.get('agent');
+    if (agentId && allMarketplaceItems.length > 0) {
+      const sharedAgent = allMarketplaceItems.find(agent => agent.id === agentId);
+      if (sharedAgent) {
+        setSelectedItem(sharedAgent);
+        setShowPreviewDialog(true);
+      }
+    }
+  }, [searchParams, allMarketplaceItems]);
 
   const handleDeleteAgent = async (agentId: string) => {
     try {
@@ -277,6 +300,35 @@ export default function AgentsPage() {
     setShowInstallDialog(true);
   };
 
+  const handlePreviewClose = () => {
+    setShowPreviewDialog(false);
+    setSelectedItem(null);
+    
+    // Remove agent parameter from URL
+    const currentUrl = new URL(window.location.href);
+    if (currentUrl.searchParams.has('agent')) {
+      currentUrl.searchParams.delete('agent');
+      router.replace(currentUrl.pathname + (currentUrl.searchParams.toString() ? '?' + currentUrl.searchParams.toString() : ''), { scroll: false });
+    }
+  };
+
+  const handlePreviewInstall = (agent: MarketplaceTemplate) => {
+    setShowPreviewDialog(false);
+    setSelectedItem(agent);
+    setShowInstallDialog(true);
+  };
+
+  const handleAgentPreview = (agent: MarketplaceTemplate) => {
+    setSelectedItem(agent);
+    setShowPreviewDialog(true);
+    
+    // Update URL with agent parameter for sharing
+    const currentUrl = new URL(window.location.href);
+    currentUrl.searchParams.set('agent', agent.id);
+    currentUrl.searchParams.set('tab', 'marketplace');
+    router.replace(currentUrl.toString(), { scroll: false });
+  };
+
   const handleInstall = async (
     item: MarketplaceTemplate, 
     instanceName?: string, 
@@ -305,7 +357,7 @@ export default function AgentsPage() {
       }
 
       const customRequirements = item.mcp_requirements?.filter(req => 
-        req.custom_type && req.custom_type !== 'pipedream'
+        req.custom_type
       ) || [];
       const missingCustomConfigs = customRequirements.filter(req => 
         !customMcpConfigs || !customMcpConfigs[req.qualified_name] || 
@@ -315,20 +367,6 @@ export default function AgentsPage() {
       if (missingCustomConfigs.length > 0) {
         const missingNames = missingCustomConfigs.map(req => req.display_name).join(', ');
         toast.error(`Please provide all required configuration for: ${missingNames}`);
-        return;
-      }
-
-      const pipedreamRequirements = item.mcp_requirements?.filter(req => 
-        req.custom_type === 'pipedream'
-      ) || [];
-      const missingPipedreamConfigs = pipedreamRequirements.filter(req => 
-        !customMcpConfigs || !customMcpConfigs[req.qualified_name] || 
-        !customMcpConfigs[req.qualified_name].profile_id
-      );
-      
-      if (missingPipedreamConfigs.length > 0) {
-        const missingNames = missingPipedreamConfigs.map(req => req.display_name).join(', ');
-        toast.error(`Please select Pipedream profiles for: ${missingNames}`);
         return;
       }
 
@@ -353,6 +391,12 @@ export default function AgentsPage() {
     } catch (error: any) {
       console.error('Installation error:', error);
 
+      if (error instanceof AgentCountLimitError) {
+        setAgentLimitError(error);
+        setShowAgentLimitDialog(true);
+        return;
+      }
+
       if (error.message?.includes('already in your library')) {
         toast.error('This agent is already in your library');
       } else if (error.message?.includes('Credential profile not found')) {
@@ -376,13 +420,10 @@ export default function AgentsPage() {
   };
 
   const getItemStyling = (item: MarketplaceTemplate) => {
-    if (item.avatar && item.avatar_color) {
-      return {
-        avatar: item.avatar,
-        color: item.avatar_color,
-      };
-    }
-    return getAgentAvatar(item.id);
+    return {
+      avatar: '🤖',
+      color: '#6366f1',
+    };
   };
 
   const handleUnpublish = async (templateId: string, templateName: string) => {
@@ -463,13 +504,10 @@ export default function AgentsPage() {
   };
 
   const getTemplateStyling = (template: any) => {
-    if (template.avatar && template.avatar_color) {
-      return {
-        avatar: template.avatar,
-        color: template.avatar_color,
-      };
-    }
-    return getAgentAvatar(template.template_id);
+    return {
+      avatar: '🤖',
+      color: '#6366f1',
+    };
   };
 
   if (flagLoading) {
@@ -501,7 +539,7 @@ export default function AgentsPage() {
       <div className="container mx-auto max-w-7xl px-4 py-8">
         <AgentsPageHeader />
       </div>
-      <div className="sticky top-0 z-50 relative">
+      <div className="sticky top-0 z-50">
         <div className="absolute inset-0 backdrop-blur-md" style={{
           maskImage: 'linear-gradient(to bottom, black 0%, black 60%, transparent 100%)',
           WebkitMaskImage: 'linear-gradient(to bottom, black 0%, black 60%, transparent 100%)'
@@ -513,7 +551,6 @@ export default function AgentsPage() {
         </div>
       </div>
       <div className="container mx-auto max-w-7xl px-4 py-2">
-        {/* Fixed height container to prevent layout shifts on tab change */}
         <div className="w-full min-h-[calc(100vh-300px)]">
           {activeTab === "my-agents" && (
             <MyAgentsTab
@@ -558,6 +595,7 @@ export default function AgentsPage() {
               onDeleteTemplate={handleDeleteTemplate}
               getItemStyling={getItemStyling}
               currentUserId={user?.id}
+              onAgentPreview={handleAgentPreview}
             />
           )}
         </div>
@@ -581,6 +619,23 @@ export default function AgentsPage() {
           open={showNewAgentDialog} 
           onOpenChange={setShowNewAgentDialog}
         />
+
+        <MarketplaceAgentPreviewDialog
+          agent={selectedItem}
+          isOpen={showPreviewDialog}
+          onClose={handlePreviewClose}
+          onInstall={handlePreviewInstall}
+          isInstalling={installingItemId === selectedItem?.id}
+        />
+        {agentLimitError && (
+          <AgentCountLimitDialog
+            open={showAgentLimitDialog}
+            onOpenChange={setShowAgentLimitDialog}
+            currentCount={agentLimitError.detail.current_count}
+            limit={agentLimitError.detail.limit}
+            tierName={agentLimitError.detail.tier_name}
+          />
+        )}
       </div>
     </div>
   );
