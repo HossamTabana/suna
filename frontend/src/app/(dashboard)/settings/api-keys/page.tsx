@@ -4,8 +4,6 @@ import React, { useState, useEffect } from 'react';
 import { Key, Plus, Trash2, Copy, Shield, ExternalLink, Sparkles } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { useRouter } from 'next/navigation';
-import { useFeatureFlag } from '@/lib/feature-flags';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -50,7 +48,7 @@ import {
   APIKeyCreateRequest,
   APIKeyResponse,
   APIKeyCreateResponse,
-} from '@/lib/api-client';
+} from '@/lib/api/api-keys';
 
 interface NewAPIKeyData {
   title: string;
@@ -59,9 +57,6 @@ interface NewAPIKeyData {
 }
 
 export default function APIKeysPage() {
-  const { enabled: customAgentsEnabled, loading: flagLoading } =
-    useFeatureFlag('custom_agents');
-  const router = useRouter();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [newKeyData, setNewKeyData] = useState<NewAPIKeyData>({
     title: '',
@@ -73,11 +68,6 @@ export default function APIKeysPage() {
   const [showCreatedKey, setShowCreatedKey] = useState(false);
   const queryClient = useQueryClient();
 
-  useEffect(() => {
-    if (!flagLoading && !customAgentsEnabled) {
-      router.replace('/dashboard');
-    }
-  }, [flagLoading, customAgentsEnabled, router]);
 
   // Fetch API keys
   const {
@@ -211,26 +201,6 @@ export default function APIKeysPage() {
     return new Date(expiresAt) < new Date();
   };
 
-  if (flagLoading) {
-    return (
-      <div className="container mx-auto max-w-6xl px-6 py-6">
-        <div className="space-y-6">
-          <div className="animate-pulse space-y-4">
-            <div className="h-12 bg-muted rounded-lg"></div>
-            <div className="space-y-3">
-              {Array.from({ length: 3 }).map((_, index) => (
-                <div key={index} className="h-32 bg-muted rounded-lg"></div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!customAgentsEnabled) {
-    return null;
-  }
 
   return (
     <div className="container mx-auto max-w-6xl px-6 py-6">
@@ -238,10 +208,10 @@ export default function APIKeysPage() {
         <div className="space-y-2">
           <div className="flex items-center gap-3">
             <Key className="w-6 h-6" />
-            <h1 className="text-2xl font-bold">API Keys</h1>
+            <h1 className="text-2xl font-medium">API Keys</h1>
           </div>
           <p className="text-muted-foreground">
-            Manage your API keys for programmatic access to Suna
+            Manage your API keys for programmatic access to Kortix
           </p>
         </div>
 
@@ -262,17 +232,17 @@ export default function APIKeysPage() {
               <div className="flex-1 space-y-3">
                 <div>
                   <h3 className="text-base font-semibold text-blue-900 dark:text-blue-100 mb-1">
-                    Suna SDK & API
+                    Kortix SDK & API
                   </h3>
                   <p className="text-sm text-blue-700 dark:text-blue-300 leading-relaxed">
-                    Our SDK and API are currently in beta. Use these API keys to integrate with our 
+                    Our SDK and API are currently in beta. Use these API keys to integrate with our
                     programmatic interface for building custom applications and automations.
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <a 
-                    href="https://github.com/kortix-ai/suna/tree/main/sdk" 
-                    target="_blank" 
+                  <a
+                    href="https://github.com/kortix-ai/suna/tree/main/sdk"
+                    target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
                   >
@@ -423,7 +393,7 @@ export default function APIKeysPage() {
               <Key className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-lg font-medium mb-2">No API keys yet</h3>
               <p className="text-muted-foreground mb-4">
-                Create your first API key pair to start using the Suna API
+                Create your first API key pair to start using the Kortix API
                 programmatically. Each key includes a public identifier and
                 secret for secure authentication.
               </p>
@@ -525,37 +495,37 @@ export default function APIKeysPage() {
 
                   {(apiKey.status === 'revoked' ||
                     apiKey.status === 'expired') && (
-                    <div className="flex gap-2 mt-4">
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="outline" size="sm">
-                            <Trash2 className="w-4 h-4 mr-2" />
-                            Delete
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Delete API Key</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              Are you sure you want to permanently delete "
-                              {apiKey.title}"? This action cannot be undone.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={() =>
-                                deleteMutation.mutate(apiKey.key_id)
-                              }
-                              className="bg-destructive hover:bg-destructive/90 text-white"
-                            >
-                              Delete Key
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  )}
+                      <div className="flex gap-2 mt-4">
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="outline" size="sm">
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Delete
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete API Key</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Are you sure you want to permanently delete "
+                                {apiKey.title}"? This action cannot be undone.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() =>
+                                  deleteMutation.mutate(apiKey.key_id)
+                                }
+                                className="bg-destructive hover:bg-destructive/90 text-white"
+                              >
+                                Delete Key
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    )}
                 </CardContent>
               </Card>
             ))}

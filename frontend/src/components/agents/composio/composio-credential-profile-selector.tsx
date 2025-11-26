@@ -15,7 +15,7 @@ import {
   Loader2,
   Plus,
 } from 'lucide-react';
-import { useCredentialProfilesForMcp } from '@/hooks/react-query/mcp/use-credential-profiles';
+import { useCredentialProfilesForMcp } from '@/hooks/mcp/use-credential-profiles';
 
 interface ComposioCredentialProfileSelectorProps {
   toolkitSlug: string;
@@ -34,7 +34,10 @@ export const ComposioCredentialProfileSelector: React.FC<ComposioCredentialProfi
   className,
   showCreateOption = true,
 }) => {
-  const mcpQualifiedName = `composio.${toolkitSlug}`;
+  const mcpQualifiedName = toolkitSlug === 'composio' 
+    ? 'composio' 
+    : `composio.${toolkitSlug}`;
+    
   const { data: profiles, isLoading } = useCredentialProfilesForMcp(mcpQualifiedName);
 
   const selectedProfile = profiles?.find(p => p.profile_id === selectedProfileId);

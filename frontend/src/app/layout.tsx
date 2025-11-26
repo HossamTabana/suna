@@ -1,57 +1,68 @@
 import { ThemeProvider } from '@/components/home/theme-provider';
-import { siteConfig } from '@/lib/site';
+import { siteConfig } from '@/lib/home';
 import type { Metadata, Viewport } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
-import { Providers } from './providers';
+import { AuthProvider } from '@/components/AuthProvider';
+import { ReactQueryProvider } from './react-query-provider';
 import { Toaster } from '@/components/ui/sonner';
 import { Analytics } from '@vercel/analytics/react';
 import { GoogleAnalytics } from '@next/third-parties/google';
 import { SpeedInsights } from '@vercel/speed-insights/next';
 import Script from 'next/script';
 import { PostHogIdentify } from '@/components/posthog-identify';
-import '@/lib/polyfills'; // Load polyfills early
+import '@/lib/polyfills';
+import { roobert } from './fonts/roobert';
+import { roobertMono } from './fonts/roobert-mono';
+import { PlanSelectionModal } from '@/components/billing/pricing/plan-selection-modal';
+import { Suspense } from 'react';
+import { I18nProvider } from '@/components/i18n-provider';
 
-const geistSans = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-});
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-});
 
 export const viewport: Viewport = {
-  themeColor: 'black',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: 'white' },
+    { media: '(prefers-color-scheme: dark)', color: 'black' }
+  ],
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
 };
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteConfig.url),
   title: {
-    default: siteConfig.name,
-    template: `%s - ${siteConfig.name}`,
+    default: 'Kortix the Super Mega Giga Worker',
+    template: `%s | ${siteConfig.name}`,
   },
-  description:
-    'Kortix is a fully open source AI assistant that helps you accomplish real-world tasks with ease. Through natural conversation, Kortix becomes your digital companion for research, data analysis, and everyday challenges.',
+  description: siteConfig.description,
   keywords: [
-    'AI',
+    'AI assistant',
+    'open source AI',
     'artificial intelligence',
+    'AI worker',
     'browser automation',
     'web scraping',
     'file management',
-    'AI assistant',
-    'open source',
-    'research',
+    'research assistant',
     'data analysis',
+    'task automation',
+    'Kortix',
+    'generalist AI',
+    'code generation',
+    'AI coding assistant',
+    'workflow automation',
+    'AI productivity',
   ],
-  authors: [{ name: 'Kortix Team', url: 'https://suna.so' }],
-  creator:
-    'Kortix Team',
-  publisher:
-    'Kortix Team',
+  authors: [
+    {
+      name: 'Kortix Team',
+      url: 'https://kortix.com'
+    }
+  ],
+  creator: 'Kortix Team',
+  publisher: 'Kortix Team',
   category: 'Technology',
-  applicationName: 'Suna',
+  applicationName: 'Kortix',
   formatDetection: {
     telephone: false,
     email: false,
@@ -60,64 +71,154 @@ export const metadata: Metadata = {
   robots: {
     index: true,
     follow: true,
+    nocache: false,
     googleBot: {
       index: true,
       follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
     },
   },
   openGraph: {
-    title: 'Suna - Open Source Generalist AI Worker',
-    description:
-      'Suna is a fully open source AI assistant that helps you accomplish real-world tasks with ease through natural conversation.',
+    type: 'website',
+    title: 'Kortix – the Super Mega Giga AI Worker',
+    description: siteConfig.description,
     url: siteConfig.url,
-    siteName: 'Suna',
+    siteName: 'Kortix',
+    locale: 'en_US',
     images: [
       {
         url: '/banner.png',
         width: 1200,
         height: 630,
-        alt: 'Suna - Open Source Generalist AI Worker',
+        alt: 'Kortix the Super Mega Giga Worker – A generalist AI Worker that autonomously tackles complex tasks',
         type: 'image/png',
       },
     ],
-    locale: 'en_US',
-    type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Suna - Open Source Generalist AI Worker',
-    description:
-      'Suna is a fully open source AI assistant that helps you accomplish real-world tasks with ease through natural conversation.',
-    creator: '@kortixai',
-    site: '@kortixai',
+    title: 'Kortix the Super Mega Giga Worker',
+    description: siteConfig.description,
+    creator: '@kortix',
+    site: '@kortix',
     images: [
       {
         url: '/banner.png',
-        width: 1200,
-        height: 630,
-        alt: 'Suna - Open Source Generalist AI Worker',
-      },
+        alt: 'Kortix the Super Mega Giga Worker',
+      }
     ],
   },
   icons: {
-    icon: [{ url: '/favicon.png', sizes: 'any' }],
+    icon: [
+      { url: '/favicon.png', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon-light.png', sizes: '32x32', type: 'image/png', media: '(prefers-color-scheme: dark)' },
+    ],
     shortcut: '/favicon.png',
+    apple: [
+      { url: '/logo_black.png', sizes: '180x180', type: 'image/png' },
+    ],
   },
-  // manifest: "/manifest.json",
+  manifest: '/manifest.json',
   alternates: {
     canonical: siteConfig.url,
+  },
+  verification: {
+    google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION,
+  },
+  other: {
+    'apple-mobile-web-app-capable': 'yes',
+    'apple-mobile-web-app-status-bar-style': 'black-translucent',
+    'apple-mobile-web-app-title': 'Kortix',
   },
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={`${roobert.variable} ${roobertMono.variable}`}>
       <head>
-        {/* Google Tag Manager */}
+
+
+        <Script id="facebook-pixel" strategy="afterInteractive">
+          {`
+            !function(f,b,e,v,n,t,s)
+            {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+            n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+            if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+            n.queue=[];t=b.createElement(e);t.async=!0;
+            t.src=v;s=b.getElementsByTagName(e)[0];
+            s.parentNode.insertBefore(t,s)}(window, document,'script',
+            'https://connect.facebook.net/en_US/fbevents.js');
+
+            fbq('init', '1385936776361131');
+            fbq('track', 'PageView');
+          `}
+        </Script>
+        <noscript>
+          <img
+            height="1"
+            width="1"
+            style={{ display: "none" }}
+            src="https://www.facebook.com/tr?id=1385936776361131&ev=PageView&noscript=1"
+          />
+        </noscript>
+
+
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              '@context': 'https://schema.org',
+              '@type': 'Organization',
+              name: 'Kortix',
+              alternateName: ['Suna', 'Kortix AI', 'Kortix the Super Mega Giga Worker'],
+              url: 'https://kortix.com',
+              logo: 'https://kortix.com/favicon.png',
+              description: siteConfig.description,
+              foundingDate: '2024',
+              sameAs: [
+                'https://github.com/kortix-ai',
+                'https://x.com/kortix',
+                'https://linkedin.com/company/kortix',
+              ],
+              contactPoint: {
+                '@type': 'ContactPoint',
+                contactType: 'Customer Support',
+                url: 'https://kortix.com',
+              },
+            }),
+          }}
+        />
+
+        {/* Structured Data for Software Application */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              '@context': 'https://schema.org',
+              '@type': 'SoftwareApplication',
+              name: 'Kortix the Super Mega Giga Worker',
+              alternateName: ['Kortix', 'Suna'],
+              applicationCategory: 'BusinessApplication',
+              operatingSystem: 'Web, macOS, Windows, Linux',
+              description: siteConfig.description,
+              offers: {
+                '@type': 'Offer',
+                price: '0',
+                priceCurrency: 'USD',
+              },
+              aggregateRating: {
+                '@type': 'AggregateRating',
+                ratingValue: '4.8',
+                ratingCount: '1000',
+              },
+            }),
+          }}
+        />
+
         <Script id="google-tag-manager" strategy="afterInteractive">
           {`(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
           new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
@@ -125,12 +226,9 @@ export default function RootLayout({
           'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
           })(window,document,'script','dataLayer','GTM-PCHSN4M2');`}
         </Script>
-        <Script async src="https://cdn.tolt.io/tolt.js" data-tolt={process.env.NEXT_PUBLIC_TOLT_REFERRAL_ID}></Script>
       </head>
 
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased font-sans bg-background`}
-      >
+      <body className="antialiased font-sans bg-background">
         <noscript>
           <iframe
             src="https://www.googletagmanager.com/ns.html?id=GTM-PCHSN4M2"
@@ -147,10 +245,17 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <Providers>
-            {children}
-            <Toaster />
-          </Providers>
+          <I18nProvider>
+            <AuthProvider>
+              <ReactQueryProvider>
+                {children}
+                <Toaster />
+                <Suspense fallback={null}>
+                  <PlanSelectionModal />
+                </Suspense>
+              </ReactQueryProvider>
+            </AuthProvider>
+          </I18nProvider>
           <Analytics />
           <GoogleAnalytics gaId="G-6ETJFB3PT3" />
           <SpeedInsights />

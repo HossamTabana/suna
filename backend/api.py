@@ -4,51 +4,60 @@ load_dotenv()
 from fastapi import FastAPI, Request, HTTPException, Response, Depends, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from services import redis
+from core.services import redis
 import sentry
 from contextlib import asynccontextmanager
-from agentpress.thread_manager import ThreadManager
-from services.supabase import DBConnection
+from core.agentpress.thread_manager import ThreadManager
+from core.services.supabase import DBConnection
 from datetime import datetime, timezone
-from utils.config import config, EnvMode
+from core.utils.config import config, EnvMode
 import asyncio
-from utils.logger import logger, structlog
+from core.utils.logger import logger, structlog
 import time
 from collections import OrderedDict
+import os
 
 from pydantic import BaseModel
 import uuid
 
-from agent import api as agent_api
+from core import api as core_api
 
-from sandbox import api as sandbox_api
-from services import billing as billing_api
-from flags import api as feature_flags_api
-from services import transcription as transcription_api
+from core.sandbox import api as sandbox_api
+from core.billing.api import router as billing_router
+from core.billing.setup_api import router as setup_router
+from core.admin.admin_api import router as admin_router
+from core.admin.billing_admin_api import router as billing_admin_router
+from core.admin.master_password_api import router as master_password_router
+from core.services import transcription as transcription_api
 import sys
-from services import email_api
-from triggers import api as triggers_api
-from services import api_keys_api
+from core.services import email_api
+from core.triggers import api as triggers_api
+from core.services import api_keys_api
 
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-# Initialize managers
 db = DBConnection()
-instance_id = "single"
+# Generate unique instance ID per process/worker
+# This is critical for distributed locking - each worker needs a unique ID
+import uuid
+instance_id = str(uuid.uuid4())[:8]
 
 # Rate limiter state
 ip_tracker = OrderedDict()
 MAX_CONCURRENT_IPS = 25
 
+# Background task handle for CloudWatch metrics
+_queue_metrics_task = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info(f"Starting up FastAPI application with instance ID: {instance_id} in {config.ENV_MODE.value} mode")
+    logger.debug(f"Starting up FastAPI application with instance ID: {instance_id} in {config.ENV_MODE.value} mode")
     try:
         await db.initialize()
         
-        agent_api.initialize(
+        core_api.initialize(
             db,
             instance_id
         )
@@ -57,39 +66,59 @@ async def lifespan(app: FastAPI):
         sandbox_api.initialize(db)
         
         # Initialize Redis connection
-        from services import redis
+        from core.services import redis
         try:
             await redis.initialize_async()
-            logger.info("Redis connection initialized successfully")
+            logger.debug("Redis connection initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Redis connection: {e}")
             # Continue without Redis - the application will handle Redis failures gracefully
         
         # Start background tasks
-        # asyncio.create_task(agent_api.restore_running_agent_runs())
+        # asyncio.create_task(core_api.restore_running_agent_runs())
         
         triggers_api.initialize(db)
-        pipedream_api.initialize(db)
         credentials_api.initialize(db)
         template_api.initialize(db)
         composio_api.initialize(db)
         
+        from core import limits_api
+        limits_api.initialize(db)
+        
+        from core.guest_session import guest_session_service
+        guest_session_service.start_cleanup_task()
+        logger.debug("Guest session cleanup task started")
+        
+        # Start CloudWatch queue metrics publisher (production only)
+        global _queue_metrics_task
+        if config.ENV_MODE == EnvMode.PRODUCTION:
+            from core.services import queue_metrics
+            _queue_metrics_task = asyncio.create_task(queue_metrics.start_cloudwatch_publisher())
+        
         yield
         
-        # Clean up agent resources
-        logger.info("Cleaning up agent resources")
-        await agent_api.cleanup()
+        logger.debug("Cleaning up agent resources")
+        await core_api.cleanup()
         
-        # Clean up Redis connection
+        logger.debug("Stopping guest session cleanup task")
+        await guest_session_service.stop_cleanup_task()
+        
+        # Stop CloudWatch queue metrics task
+        if _queue_metrics_task is not None:
+            _queue_metrics_task.cancel()
+            try:
+                await _queue_metrics_task
+            except asyncio.CancelledError:
+                pass
+        
         try:
-            logger.info("Closing Redis connection")
+            logger.debug("Closing Redis connection")
             await redis.close()
-            logger.info("Redis connection closed successfully")
+            logger.debug("Redis connection closed successfully")
         except Exception as e:
             logger.error(f"Error closing Redis connection: {e}")
-        
-        # Clean up database connection
-        logger.info("Disconnecting from database")
+
+        logger.debug("Disconnecting from database")
         await db.disconnect()
     except Exception as e:
         logger.error(f"Error during application startup: {e}")
@@ -117,7 +146,7 @@ async def log_requests_middleware(request: Request, call_next):
     )
 
     # Log the incoming request
-    logger.info(f"Request started: {method} {path} from {client_ip} | Query: {query_params}")
+    logger.debug(f"Request started: {method} {path} from {client_ip} | Query: {query_params}")
     
     try:
         response = await call_next(request)
@@ -126,22 +155,33 @@ async def log_requests_middleware(request: Request, call_next):
         return response
     except Exception as e:
         process_time = time.time() - start_time
-        logger.error(f"Request failed: {method} {path} | Error: {str(e)} | Time: {process_time:.2f}s")
+        try:
+            error_str = str(e)
+        except Exception:
+            error_str = f"Error of type {type(e).__name__}"
+        logger.error(f"Request failed: {method} {path} | Error: {error_str} | Time: {process_time:.2f}s")
         raise
 
 # Define allowed origins based on environment
-allowed_origins = ["https://www.suna.so", "https://suna.so"]
+allowed_origins = ["https://www.kortix.com", "https://kortix.com", "https://www.suna.so", "https://suna.so"]
 allow_origin_regex = None
 
 # Add staging-specific origins
 if config.ENV_MODE == EnvMode.LOCAL:
     allowed_origins.append("http://localhost:3000")
+    allowed_origins.append("http://127.0.0.1:3000")
 
 # Add staging-specific origins
 if config.ENV_MODE == EnvMode.STAGING:
     allowed_origins.append("https://staging.suna.so")
     allowed_origins.append("http://localhost:3000")
-    allow_origin_regex = r"https://suna-.*-prjcts\.vercel\.app"
+    # Allow Vercel preview deployments for both legacy and new project names
+    allow_origin_regex = r"https://(suna|kortixcom)-.*-prjcts\.vercel\.app"
+
+# Add localhost for production mode local testing (for master password login)
+if config.ENV_MODE == EnvMode.PRODUCTION:
+    allowed_origins.append("http://localhost:3000")
+    allowed_origins.append("http://127.0.0.1:3000")
 
 app.add_middleware(
     CORSMiddleware,
@@ -156,53 +196,64 @@ app.add_middleware(
 api_router = APIRouter()
 
 # Include all API routers without individual prefixes
-api_router.include_router(agent_api.router)
+api_router.include_router(core_api.router)
 api_router.include_router(sandbox_api.router)
-api_router.include_router(billing_api.router)
-api_router.include_router(feature_flags_api.router)
+api_router.include_router(billing_router)
+api_router.include_router(setup_router)
 api_router.include_router(api_keys_api.router)
+api_router.include_router(billing_admin_router)
+api_router.include_router(admin_router)
+api_router.include_router(master_password_router)
 
-from mcp_module import api as mcp_api
-from credentials import api as credentials_api
-from templates import api as template_api
+from core.mcp_module import api as mcp_api
+from core.credentials import api as credentials_api
+from core.templates import api as template_api
+from core.templates import presentations_api
 
 api_router.include_router(mcp_api.router)
 api_router.include_router(credentials_api.router, prefix="/secure-mcp")
 api_router.include_router(template_api.router, prefix="/templates")
+api_router.include_router(presentations_api.router, prefix="/presentation-templates")
 
 api_router.include_router(transcription_api.router)
 api_router.include_router(email_api.router)
 
-from knowledge_base import api as knowledge_base_api
+from core.knowledge_base import api as knowledge_base_api
 api_router.include_router(knowledge_base_api.router)
 
 api_router.include_router(triggers_api.router)
 
-from pipedream import api as pipedream_api
-api_router.include_router(pipedream_api.router)
-
-# MFA functionality moved to frontend
-
-
-
-from admin import api as admin_api
-api_router.include_router(admin_api.router)
-
-from composio_integration import api as composio_api
+from core.composio_integration import api as composio_api
 api_router.include_router(composio_api.router)
 
-@api_router.get("/health")
+from core.google.google_slides_api import router as google_slides_router
+api_router.include_router(google_slides_router)
+
+from core.google.google_docs_api import router as google_docs_router
+api_router.include_router(google_docs_router)
+
+@api_router.get("/health", summary="Health Check", operation_id="health_check", tags=["system"])
 async def health_check():
-    logger.info("Health check endpoint called")
+    logger.debug("Health check endpoint called")
     return {
         "status": "ok", 
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "instance_id": instance_id
     }
 
-@api_router.get("/health-docker")
-async def health_check():
-    logger.info("Health docker check endpoint called")
+@api_router.get("/metrics/queue", summary="Queue Metrics", operation_id="queue_metrics", tags=["system"])
+async def queue_metrics_endpoint():
+    """Get Dramatiq queue depth for monitoring and auto-scaling."""
+    from core.services import queue_metrics
+    try:
+        return await queue_metrics.get_queue_metrics()
+    except Exception as e:
+        logger.error(f"Failed to get queue metrics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get queue metrics")
+
+@api_router.get("/health-docker", summary="Docker Health Check", operation_id="health_check_docker", tags=["system"])
+async def health_check_docker():
+    logger.debug("Health docker check endpoint called")
     try:
         client = await redis.get_client()
         await client.ping()
@@ -210,7 +261,7 @@ async def health_check():
         await db.initialize()
         db_client = await db.client
         await db_client.table("threads").select("thread_id").limit(1).execute()
-        logger.info("Health docker check complete")
+        logger.debug("Health docker check complete")
         return {
             "status": "ok", 
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -230,9 +281,12 @@ if __name__ == "__main__":
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     
-    workers = 4
+    # Enable reload mode for local and staging environments
+    is_dev_env = config.ENV_MODE in [EnvMode.LOCAL, EnvMode.STAGING]
+    workers = 1 if is_dev_env else 4
+    reload = is_dev_env
     
-    logger.info(f"Starting server on 0.0.0.0:8000 with {workers} workers")
+    logger.debug(f"Starting server on 0.0.0.0:8000 with {workers} workers (reload={reload})")
     uvicorn.run(
         "api:app", 
         host="0.0.0.0", 

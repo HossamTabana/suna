@@ -4,15 +4,14 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
-import { useAgents, useUpdateAgent, useDeleteAgent, useOptimisticAgentUpdate, useAgentDeletionState } from '@/hooks/react-query/agents/use-agents';
-import { useMarketplaceTemplates, useInstallTemplate, useMyTemplates, useUnpublishTemplate, usePublishTemplate, useCreateTemplate, useDeleteTemplate } from '@/hooks/react-query/secure-mcp/use-secure-mcp';
-import { useFeatureFlag } from '@/lib/feature-flags';
+import { useAgents, useUpdateAgent, useDeleteAgent, useOptimisticAgentUpdate, useAgentDeletionState } from '@/hooks/agents/use-agents';
+import { useMarketplaceTemplates, useInstallTemplate, useMyTemplates, useUnpublishTemplate, usePublishTemplate, useCreateTemplate, useDeleteTemplate } from '@/hooks/secure-mcp/use-secure-mcp';
 import { useAuth } from '@/components/AuthProvider';
 
 import { StreamlinedInstallDialog } from '@/components/agents/installation/streamlined-install-dialog';
 import type { MarketplaceTemplate } from '@/components/agents/installation/types';
 
-import { AgentsParams } from '@/hooks/react-query/agents/utils';
+import { AgentsParams } from '@/hooks/agents/utils';
 
 import { AgentsPageHeader } from '@/components/agents/custom-agents-page/header';
 import { TabsNavigation } from '@/components/agents/custom-agents-page/tabs-navigation';
@@ -22,8 +21,7 @@ import { PublishDialog } from '@/components/agents/custom-agents-page/publish-di
 import { LoadingSkeleton } from '@/components/agents/custom-agents-page/loading-skeleton';
 import { NewAgentDialog } from '@/components/agents/new-agent-dialog';
 import { MarketplaceAgentPreviewDialog } from '@/components/agents/marketplace-agent-preview-dialog';
-import { AgentCountLimitDialog } from '@/components/agents/agent-count-limit-dialog';
-import { AgentCountLimitError } from '@/lib/api';
+import { AgentCountLimitError } from '@/lib/api/errors';
 
 type ViewMode = 'grid' | 'list';
 type AgentSortOption = 'name' | 'created_at' | 'updated_at' | 'tools_count';
@@ -44,16 +42,7 @@ interface PublishDialogData {
 
 export default function AgentsPage() {
   const { user } = useAuth();
-  const { enabled: customAgentsEnabled, loading: agentsFlagLoading } = useFeatureFlag("custom_agents");
-  const { enabled: agentMarketplaceEnabled, loading: marketplaceFlagLoading } = useFeatureFlag("agent_marketplace");
   const router = useRouter();
-  const flagLoading = agentsFlagLoading || marketplaceFlagLoading;
-
-  useEffect(() => {
-    if (!flagLoading && !customAgentsEnabled) {
-      router.replace("/dashboard");
-    }
-  }, [flagLoading, customAgentsEnabled, router]);
 
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
@@ -62,6 +51,7 @@ export default function AgentsPage() {
   const pathname = usePathname();
   
   const [agentsPage, setAgentsPage] = useState(1);
+  const [agentsPageSize, setAgentsPageSize] = useState(20);
   const [agentsSearchQuery, setAgentsSearchQuery] = useState('');
   const [agentsSortBy, setAgentsSortBy] = useState<AgentSortOption>('created_at');
   const [agentsSortOrder, setAgentsSortOrder] = useState<SortOrder>('desc');
@@ -73,6 +63,7 @@ export default function AgentsPage() {
   });
 
   const [marketplacePage, setMarketplacePage] = useState(1);
+  const [marketplacePageSize, setMarketplacePageSize] = useState(20);
   const [marketplaceSearchQuery, setMarketplaceSearchQuery] = useState('');
   const [marketplaceSelectedTags, setMarketplaceSelectedTags] = useState<string[]>([]);
   const [marketplaceSortBy, setMarketplaceSortBy] = useState<MarketplaceSortOption>('newest');
@@ -81,26 +72,43 @@ export default function AgentsPage() {
   const [showInstallDialog, setShowInstallDialog] = useState(false);
   const [showPreviewDialog, setShowPreviewDialog] = useState(false);
   const [marketplaceFilter, setMarketplaceFilter] = useState<'all' | 'kortix' | 'community' | 'mine'>('all');
+  
+  const [templatesPage, setTemplatesPage] = useState(1);
+  const [templatesPageSize, setTemplatesPageSize] = useState(20);
+  const [templatesSearchQuery, setTemplatesSearchQuery] = useState('');
+  const [templatesSortBy, setTemplatesSortBy] = useState<'created_at' | 'name' | 'download_count'>('created_at');
+  const [templatesSortOrder, setTemplatesSortOrder] = useState<'asc' | 'desc'>('desc');
 
   const [templatesActioningId, setTemplatesActioningId] = useState<string | null>(null);
   const [publishDialog, setPublishDialog] = useState<PublishDialogData | null>(null);
 
   const [publishingAgentId, setPublishingAgentId] = useState<string | null>(null);
   const [showNewAgentDialog, setShowNewAgentDialog] = useState(false);
-  const [showAgentLimitDialog, setShowAgentLimitDialog] = useState(false);
-  const [agentLimitError, setAgentLimitError] = useState<AgentCountLimitError | null>(null);
 
   const activeTab = useMemo(() => {
-    return searchParams.get('tab') || 'my-agents';
+    const tab = searchParams.get('tab');
+    if (tab === 'marketplace') {
+      return 'my-agents';
+    }
+    return tab || 'my-agents';
   }, [searchParams]);
+
+  useEffect(() => {
+    if (searchParams.get('tab') === 'marketplace') {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set('tab', 'my-agents');
+      router.replace(`${pathname}?${params.toString()}`);
+    }
+  }, [searchParams, pathname, router]);
 
   const agentsQueryParams: AgentsParams = useMemo(() => {
     const params: AgentsParams = {
       page: agentsPage,
-      limit: 20,
+      limit: agentsPageSize,
       search: agentsSearchQuery || undefined,
       sort_by: agentsSortBy,
       sort_order: agentsSortOrder,
+      content_type: "agents",
     };
 
     if (agentsFilters.hasDefaultAgent) {
@@ -117,20 +125,53 @@ export default function AgentsPage() {
     }
 
     return params;
-  }, [agentsPage, agentsSearchQuery, agentsSortBy, agentsSortOrder, agentsFilters]);
+  }, [agentsPage, agentsPageSize, agentsSearchQuery, agentsSortBy, agentsSortOrder, agentsFilters]);
 
-  const marketplaceQueryParams = useMemo(() => ({
-    limit: 20,
-    offset: (marketplacePage - 1) * 20,
-    search: marketplaceSearchQuery || undefined,
-    tags: marketplaceSelectedTags.length > 0 ? marketplaceSelectedTags.join(',') : undefined,
-  }), [marketplacePage, marketplaceSearchQuery, marketplaceSelectedTags]);
+  const marketplaceQueryParams = useMemo(() => {
+    const params: any = {
+      page: marketplacePage,
+      limit: marketplacePageSize,
+      search: marketplaceSearchQuery || undefined,
+      tags: marketplaceSelectedTags.length > 0 ? marketplaceSelectedTags.join(',') : undefined,
+      sort_by: "download_count",
+      sort_order: "desc"
+    };
+    
+    if (marketplaceFilter === 'kortix') {
+      params.is_kortix_team = true;
+    } else if (marketplaceFilter === 'community') {
+      params.is_kortix_team = false;
+    } else if (marketplaceFilter === 'mine') {
+      params.mine = true;
+    }
+    
+    return params;
+  }, [marketplacePage, marketplacePageSize, marketplaceSearchQuery, marketplaceSelectedTags, marketplaceFilter]);
+
+  const templatesQueryParams = useMemo(() => ({
+    page: templatesPage,
+    limit: templatesPageSize,
+    search: templatesSearchQuery || undefined,
+    sort_by: templatesSortBy,
+    sort_order: templatesSortOrder
+  }), [templatesPage, templatesPageSize, templatesSearchQuery, templatesSortBy, templatesSortOrder]);
 
   const { data: agentsResponse, isLoading: agentsLoading, error: agentsError, refetch: loadAgents } = useAgents(agentsQueryParams);
   const { data: marketplaceTemplates, isLoading: marketplaceLoading } = useMarketplaceTemplates(marketplaceQueryParams);
-  const { data: myTemplates, isLoading: templatesLoading, error: templatesError } = useMyTemplates();
 
-  console.log(marketplaceTemplates);
+  const templatesAgentsQueryParams = useMemo(() => ({
+    ...agentsQueryParams,
+    page: templatesPage,
+    limit: templatesPageSize,
+    search: templatesSearchQuery || undefined,
+    sort_by: templatesSortBy,
+    sort_order: templatesSortOrder,
+    content_type: "templates"
+  }), [templatesPage, templatesPageSize, templatesSearchQuery, templatesSortBy, templatesSortOrder]);
+  
+  const { data: templatesResponse, isLoading: templatesLoading, error: templatesError } = useAgents(templatesAgentsQueryParams);
+  const myTemplates = templatesResponse?.agents;
+  const templatesPagination = templatesResponse?.pagination;
   
   const updateAgentMutation = useUpdateAgent();
   const { optimisticallyUpdateAgent, revertOptimisticUpdate } = useOptimisticAgentUpdate();
@@ -144,85 +185,38 @@ export default function AgentsPage() {
   const agents = agentsResponse?.agents || [];
   const agentsPagination = agentsResponse?.pagination;
 
-  const { kortixTeamItems, communityItems, mineItems } = useMemo(() => {
-    const kortixItems: MarketplaceTemplate[] = [];
-    const communityItems: MarketplaceTemplate[] = [];
-    const mineItems: MarketplaceTemplate[] = [];
-
-    if (marketplaceTemplates) {
-      marketplaceTemplates.forEach(template => {
+  const allMarketplaceItems = useMemo(() => {
+    const items: MarketplaceTemplate[] = [];
+    if (marketplaceTemplates?.templates) {
+      marketplaceTemplates.templates.forEach(template => {
         const item: MarketplaceTemplate = {
           id: template.template_id,
           creator_id: template.creator_id,
           name: template.name,
           description: template.description,
+          system_prompt: template.system_prompt,
           tags: template.tags || [],
           download_count: template.download_count || 0,
           creator_name: template.creator_name || 'Anonymous',
           created_at: template.created_at,
           marketplace_published_at: template.marketplace_published_at,
-          profile_image_url: template.profile_image_url,
+          icon_name: template.icon_name,
+          icon_color: template.icon_color,
+          icon_background: template.icon_background,
           template_id: template.template_id,
           is_kortix_team: template.is_kortix_team,
           mcp_requirements: template.mcp_requirements,
           metadata: template.metadata,
+          usage_examples: template.usage_examples,
+          config: template.config,
         };
 
-        const matchesSearch = !marketplaceSearchQuery.trim() || (() => {
-          const searchLower = marketplaceSearchQuery.toLowerCase();
-          return item.name.toLowerCase().includes(searchLower) ||
-                 item.description?.toLowerCase().includes(searchLower) ||
-                 item.tags.some(tag => tag.toLowerCase().includes(searchLower)) ||
-                 item.creator_name?.toLowerCase().includes(searchLower);
-        })();
-
-        if (!matchesSearch) return;
-
-        if (user?.id === template.creator_id) {
-          mineItems.push(item);
-        }
-        
-        if (template.is_kortix_team === true) {
-          kortixItems.push(item);
-        } else {
-          communityItems.push(item);
-        }
+        items.push(item);
       });
     }
 
-    const sortItems = (items: MarketplaceTemplate[]) =>
-      items.sort((a, b) => {
-        switch (marketplaceSortBy) {
-          case 'newest':
-            return new Date(b.marketplace_published_at || b.created_at).getTime() - 
-                   new Date(a.marketplace_published_at || a.created_at).getTime();
-          case 'popular':
-          case 'most_downloaded':
-            return b.download_count - a.download_count;
-          case 'name':
-            return a.name.localeCompare(b.name);
-          default:
-            return 0;
-        }
-      });
-
-    return {
-      kortixTeamItems: sortItems(kortixItems),
-      communityItems: sortItems(communityItems),
-      mineItems: sortItems(mineItems)
-    };
-  }, [marketplaceTemplates, marketplaceSortBy, user?.id, marketplaceSearchQuery]);
-
-  const allMarketplaceItems = useMemo(() => {
-    if (marketplaceFilter === 'kortix') {
-      return kortixTeamItems;
-    } else if (marketplaceFilter === 'community') {
-      return communityItems;
-    } else if (marketplaceFilter === 'mine') {
-      return mineItems;
-    }
-    return [...kortixTeamItems, ...communityItems];
-  }, [kortixTeamItems, communityItems, mineItems, marketplaceFilter]);
+    return items;
+  }, [marketplaceTemplates]);
 
   const handleTabChange = (newTab: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -250,7 +244,10 @@ export default function AgentsPage() {
     setMarketplacePage(1);
   }, [marketplaceSearchQuery, marketplaceSelectedTags, marketplaceSortBy]);
 
-  // Handle shared agent URL parameter
+  useEffect(() => {
+    setTemplatesPage(1);
+  }, [templatesSearchQuery, templatesSortBy, templatesSortOrder]);
+
   useEffect(() => {
     const agentId = searchParams.get('agent');
     if (agentId && allMarketplaceItems.length > 0) {
@@ -304,7 +301,6 @@ export default function AgentsPage() {
     setShowPreviewDialog(false);
     setSelectedItem(null);
     
-    // Remove agent parameter from URL
     const currentUrl = new URL(window.location.href);
     if (currentUrl.searchParams.has('agent')) {
       currentUrl.searchParams.delete('agent');
@@ -325,7 +321,7 @@ export default function AgentsPage() {
     // Update URL with agent parameter for sharing
     const currentUrl = new URL(window.location.href);
     currentUrl.searchParams.set('agent', agent.id);
-    currentUrl.searchParams.set('tab', 'marketplace');
+    currentUrl.searchParams.set('tab', 'my-agents');
     router.replace(currentUrl.toString(), { scroll: false });
   };
 
@@ -333,7 +329,9 @@ export default function AgentsPage() {
     item: MarketplaceTemplate, 
     instanceName?: string, 
     profileMappings?: Record<string, string>, 
-    customMcpConfigs?: Record<string, Record<string, any>>
+    customMcpConfigs?: Record<string, Record<string, any>>,
+    triggerConfigs?: Record<string, Record<string, any>>,
+    triggerVariables?: Record<string, Record<string, string>>
   ) => {
     setInstallingItemId(item.id);
     
@@ -346,9 +344,12 @@ export default function AgentsPage() {
       const regularRequirements = item.mcp_requirements?.filter(req => 
         !req.custom_type
       ) || [];
-      const missingProfiles = regularRequirements.filter(req => 
-        !profileMappings || !profileMappings[req.qualified_name] || profileMappings[req.qualified_name].trim() === ''
-      );
+      const missingProfiles = regularRequirements.filter(req => {
+        const profileKey = req.source === 'trigger' && req.trigger_index !== undefined
+          ? `${req.qualified_name}_trigger_${req.trigger_index}`
+          : req.qualified_name;
+        return !profileMappings || !profileMappings[profileKey] || profileMappings[profileKey].trim() === '';
+      });
       
       if (missingProfiles.length > 0) {
         const missingNames = missingProfiles.map(req => req.display_name).join(', ');
@@ -370,20 +371,69 @@ export default function AgentsPage() {
         return;
       }
 
+      console.log('Installing template with:', {
+        template_id: item.template_id,
+        instance_name: instanceName,
+        profile_mappings: profileMappings,
+        custom_mcp_configs: customMcpConfigs,
+        trigger_configs: triggerConfigs,
+        trigger_variables: triggerVariables
+      });
+      
       const result = await installTemplateMutation.mutateAsync({
         template_id: item.template_id,
         instance_name: instanceName,
         profile_mappings: profileMappings,
-        custom_mcp_configs: customMcpConfigs
+        custom_mcp_configs: customMcpConfigs,
+        trigger_configs: triggerConfigs,
+        trigger_variables: triggerVariables
       });
+      
+      console.log('Installation result:', result);
 
       if (result.status === 'installed') {
         toast.success(`Agent "${instanceName}" installed successfully!`);
         setShowInstallDialog(false);
         handleTabChange('my-agents');
       } else if (result.status === 'configs_required') {
-        toast.error('Please provide all required configurations');
-        return;
+        if (result.missing_trigger_variables && Object.keys(result.missing_trigger_variables).length > 0) {
+          toast.warning('Please provide values for template trigger variables.');
+          setInstallingItemId('');
+          return;
+        }
+        
+        if (result.missing_regular_credentials && result.missing_regular_credentials.length > 0) {
+          const updatedRequirements = [
+            ...(item.mcp_requirements || []),
+            ...result.missing_regular_credentials.map((cred: any) => ({
+              qualified_name: cred.qualified_name,
+              display_name: cred.display_name,
+              enabled_tools: cred.enabled_tools || [],
+              required_config: cred.required_config || [],
+              custom_type: cred.custom_type,
+              toolkit_slug: cred.toolkit_slug,
+              app_slug: cred.app_slug,
+              source: cred.source,
+              trigger_index: cred.trigger_index
+            }))
+          ];
+          
+          setSelectedItem({
+            ...item,
+            mcp_requirements: updatedRequirements
+          });
+          
+          toast.warning('Additional configurations required. Please complete the setup.');
+          return;
+        } else if (result.missing_custom_configs && result.missing_custom_configs.length > 0) {
+          console.error('Missing custom configs:', result.missing_custom_configs);
+          toast.error('Please provide all required custom MCP configurations');
+          return;
+        } else {
+          console.error('Unknown config required response:', result);
+          toast.error('Please provide all required configurations');
+          return;
+        }
       } else {
         toast.error('Unexpected response from server. Please try again.');
         return;
@@ -392,8 +442,6 @@ export default function AgentsPage() {
       console.error('Installation error:', error);
 
       if (error instanceof AgentCountLimitError) {
-        setAgentLimitError(error);
-        setShowAgentLimitDialog(true);
         return;
       }
 
@@ -421,9 +469,23 @@ export default function AgentsPage() {
 
   const getItemStyling = (item: MarketplaceTemplate) => {
     return {
-      avatar: '🤖',
       color: '#6366f1',
     };
+  };
+
+  const handleAgentsPageSizeChange = (newPageSize: number) => {
+    setAgentsPageSize(newPageSize);
+    setAgentsPage(1);
+  };
+
+  const handleMarketplacePageSizeChange = (newPageSize: number) => {
+    setMarketplacePageSize(newPageSize);
+    setMarketplacePage(1);
+  };
+
+  const handleTemplatesPageSizeChange = (newPageSize: number) => {
+    setTemplatesPageSize(newPageSize);
+    setTemplatesPage(1);
   };
 
   const handleUnpublish = async (templateId: string, templateName: string) => {
@@ -468,7 +530,7 @@ export default function AgentsPage() {
     });
   };
 
-  const handlePublish = async () => {
+  const handlePublish = async (usageExamples: any[]) => {
     if (!publishDialog) return;
 
     try {
@@ -479,16 +541,17 @@ export default function AgentsPage() {
         
         const result = await createTemplateMutation.mutateAsync({
           agent_id: publishDialog.templateId,
-          make_public: true
+          make_public: true,
+          usage_examples: usageExamples
         });
         
         toast.success(`${publishDialog.templateName} has been published to the marketplace`);
       } else {
-        // Publishing an existing template
         setTemplatesActioningId(publishDialog.templateId);
         
         await publishMutation.mutateAsync({
-          template_id: publishDialog.templateId
+          template_id: publishDialog.templateId,
+          usage_examples: usageExamples
         });
         
         toast.success(`${publishDialog.templateName} has been published to the marketplace`);
@@ -505,34 +568,9 @@ export default function AgentsPage() {
 
   const getTemplateStyling = (template: any) => {
     return {
-      avatar: '🤖',
       color: '#6366f1',
     };
   };
-
-  if (flagLoading) {
-    return (
-      <div className="min-h-screen">
-        <div className="container max-w-7xl mx-auto px-4 py-8">
-          <AgentsPageHeader />
-        </div>
-        
-        <div className="sticky top-0 z-50 bg-background/95 backdrop-blur-md border-b border-border/40 shadow-sm">
-          <div className="container max-w-7xl mx-auto px-4 py-4">
-            <TabsNavigation activeTab={activeTab} onTabChange={handleTabChange} onCreateAgent={handleCreateNewAgent} />
-          </div>
-        </div>
-
-        <div className="container max-w-7xl mx-auto px-4 py-8">
-          <LoadingSkeleton />
-        </div>
-      </div>
-    );
-  }
-
-  if (!customAgentsEnabled) {
-    return null;
-  }
 
   return (
     <div className="min-h-screen">
@@ -567,10 +605,19 @@ export default function AgentsPage() {
               onClearFilters={clearAgentsFilters}
               isDeletingAgent={isDeletingAgent}
               setAgentsPage={setAgentsPage}
+              agentsPageSize={agentsPageSize}
+              onAgentsPageSizeChange={handleAgentsPageSizeChange}
               myTemplates={myTemplates}
               templatesLoading={templatesLoading}
               templatesError={templatesError}
               templatesActioningId={templatesActioningId}
+              templatesPagination={templatesPagination}
+              templatesPage={templatesPage}
+              setTemplatesPage={setTemplatesPage}
+              templatesPageSize={templatesPageSize}
+              onTemplatesPageSizeChange={handleTemplatesPageSizeChange}
+              templatesSearchQuery={templatesSearchQuery}
+              setTemplatesSearchQuery={setTemplatesSearchQuery}
               onPublish={openPublishDialog}
               onUnpublish={handleUnpublish}
               getTemplateStyling={getTemplateStyling}
@@ -579,6 +626,7 @@ export default function AgentsPage() {
             />
           )}
 
+          {/* Marketplace tab is disabled
           {activeTab === "marketplace" && (
             <MarketplaceTab
               marketplaceSearchQuery={marketplaceSearchQuery}
@@ -587,17 +635,20 @@ export default function AgentsPage() {
               setMarketplaceFilter={setMarketplaceFilter}
               marketplaceLoading={marketplaceLoading}
               allMarketplaceItems={allMarketplaceItems}
-              kortixTeamItems={kortixTeamItems}
-              communityItems={communityItems}
-              mineItems={mineItems}
+              mineItems={[]}
               installingItemId={installingItemId}
               onInstallClick={handleInstallClick}
               onDeleteTemplate={handleDeleteTemplate}
               getItemStyling={getItemStyling}
               currentUserId={user?.id}
               onAgentPreview={handleAgentPreview}
+              marketplacePage={marketplacePage}
+              setMarketplacePage={setMarketplacePage}
+              marketplacePageSize={marketplacePageSize}
+              onMarketplacePageSizeChange={handleMarketplacePageSizeChange}
+              marketplacePagination={marketplaceTemplates?.pagination}
             />
-          )}
+          )} */}
         </div>
 
         <PublishDialog
@@ -627,15 +678,6 @@ export default function AgentsPage() {
           onInstall={handlePreviewInstall}
           isInstalling={installingItemId === selectedItem?.id}
         />
-        {agentLimitError && (
-          <AgentCountLimitDialog
-            open={showAgentLimitDialog}
-            onOpenChange={setShowAgentLimitDialog}
-            currentCount={agentLimitError.detail.current_count}
-            limit={agentLimitError.detail.limit}
-            tierName={agentLimitError.detail.tier_name}
-          />
-        )}
       </div>
     </div>
   );

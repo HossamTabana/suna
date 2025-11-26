@@ -12,11 +12,10 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
-import { Clock, Calendar as CalendarIcon, Info, Zap, Repeat, Timer, Target } from 'lucide-react';
+import { Clock, Calendar as CalendarIcon, Info, Zap, Repeat, Timer, Target, Activity } from 'lucide-react';
 import { format, startOfDay } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { TriggerProvider, ScheduleTriggerConfig } from '../types';
-import { useAgentWorkflows } from '@/hooks/react-query/agents/use-agent-workflows';
 
 interface ScheduleTriggerConfigFormProps {
   provider: TriggerProvider;
@@ -34,18 +33,6 @@ interface ScheduleTriggerConfigFormProps {
 
 type ScheduleType = 'quick' | 'recurring' | 'advanced' | 'one-time';
 
-type VariableType = 'string' | 'number' | 'boolean' | 'select' | 'multiselect';
-
-interface VariableSpec {
-  key: string;
-  label: string;
-  type: VariableType;
-  required?: boolean;
-  options?: string[];
-  default?: string | number | boolean | string[];
-  helperText?: string;
-}
-
 interface QuickPreset {
   name: string;
   cron: string;
@@ -55,10 +42,6 @@ interface QuickPreset {
 }
 
 const QUICK_PRESETS: QuickPreset[] = [
-  { name: 'Every minute', cron: '* * * * *', description: 'Every minute', icon: <Zap className="h-4 w-4" />, category: 'frequent' },
-  { name: 'Every 5 minutes', cron: '*/5 * * * *', description: 'Every 5 minutes', icon: <Timer className="h-4 w-4" />, category: 'frequent' },
-  { name: 'Every 15 minutes', cron: '*/15 * * * *', description: 'Every 15 minutes', icon: <Timer className="h-4 w-4" />, category: 'frequent' },
-  { name: 'Every 30 minutes', cron: '*/30 * * * *', description: 'Every 30 minutes', icon: <Timer className="h-4 w-4" />, category: 'frequent' },
   { name: 'Every hour', cron: '0 * * * *', description: 'At the start of every hour', icon: <Clock className="h-4 w-4" />, category: 'frequent' },
 
   { name: 'Daily at 9 AM', cron: '0 9 * * *', description: 'Every day at 9:00 AM', icon: <Target className="h-4 w-4" />, category: 'daily' },
@@ -128,9 +111,9 @@ export const ScheduleTriggerConfigForm: React.FC<ScheduleTriggerConfigFormProps>
   isActive,
   onActiveChange,
 }) => {
-  const { data: workflows = [], isLoading: isLoadingWorkflows } = useAgentWorkflows(agentId);
   const [scheduleType, setScheduleType] = useState<ScheduleType>('quick');
   const [selectedPreset, setSelectedPreset] = useState<string>('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('frequent');
 
   const [recurringType, setRecurringType] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [selectedWeekdays, setSelectedWeekdays] = useState<string[]>(['1', '2', '3', '4', '5']);
@@ -141,62 +124,13 @@ export const ScheduleTriggerConfigForm: React.FC<ScheduleTriggerConfigFormProps>
   const [selectedDate, setSelectedDate] = useState<Date>();
   const [oneTimeTime, setOneTimeTime] = useState<{ hour: string; minute: string }>({ hour: '09', minute: '00' });
 
-  const selectedWorkflow = useMemo(() => {
-    return (workflows || []).find((w) => w.id === config.workflow_id);
-  }, [workflows, config.workflow_id]);
-
-  const { variableSpecs, templateText } = useMemo(() => {
-    if (!selectedWorkflow) return { variableSpecs: [] as VariableSpec[], templateText: '' };
-    const stepsAny = ((selectedWorkflow as any)?.steps as any[]) || [];
-    const start = stepsAny.find(
-      (s: any) => s?.name === 'Start' && s?.description === 'Click to add steps or use the Add Node button',
-    );
-    const child = start?.children?.[0] ?? stepsAny[0];
-    const vars = (child?.config?.playbook?.variables as VariableSpec[]) || [];
-    const tpl = (child?.config?.playbook?.template as string) || '';
-    return { variableSpecs: vars, templateText: tpl };
-  }, [selectedWorkflow]);
-
-  // Initialize defaults for variable inputs when workflow changes or dialog loads
-  useEffect(() => {
-    if (!selectedWorkflow || config.execution_type !== 'workflow') return;
-    if (!variableSpecs || variableSpecs.length === 0) return;
-    const defaults: Record<string, any> = {};
-    for (const v of variableSpecs) {
-      if (v.default !== undefined && (config.workflow_input?.[v.key] === undefined)) {
-        defaults[v.key] = v.default;
-      }
-    }
-    if (Object.keys(defaults).length > 0) {
-      onChange({
-        ...config,
-        workflow_input: { ...(config.workflow_input || {}), ...defaults },
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedWorkflow?.id, config.execution_type]);
-
-  const handleVarChange = useCallback((key: string, value: any) => {
-    onChange({
-      ...config,
-      workflow_input: { ...(config.workflow_input || {}), [key]: value },
-    });
-  }, [config, onChange]);
-
   useEffect(() => {
     if (!config.timezone) {
-      try {
-        const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        onChange({
-          ...config,
-          timezone: detectedTimezone,
-        });
-      } catch (error) {
-        onChange({
-          ...config,
-          timezone: 'UTC',
-        });
-      }
+      const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      onChange({
+        ...config,
+        timezone: detectedTimezone,
+      });
     }
   }, []);
 
@@ -296,34 +230,6 @@ export const ScheduleTriggerConfigForm: React.FC<ScheduleTriggerConfigFormProps>
     }
   };
 
-  const handleExecutionTypeChange = (value: 'agent' | 'workflow') => {
-    const newConfig = {
-      ...config,
-      execution_type: value,
-    };
-    if (value === 'agent') {
-      delete newConfig.workflow_id;
-      delete newConfig.workflow_input;
-    } else {
-      delete newConfig.agent_prompt;
-      if (!newConfig.workflow_input) {
-        newConfig.workflow_input = { prompt: '' };
-      }
-    }
-    onChange(newConfig);
-  };
-
-  const handleWorkflowChange = (workflowId: string) => {
-    if (workflowId.startsWith('__')) {
-      return;
-    }
-    onChange({
-      ...config,
-      workflow_id: workflowId,
-      // reset inputs when switching playbooks to avoid leaking old keys
-      workflow_input: {},
-    });
-  };
 
   const handleWeekdayToggle = (weekday: string) => {
     setSelectedWeekdays(prev =>
@@ -355,42 +261,31 @@ export const ScheduleTriggerConfigForm: React.FC<ScheduleTriggerConfigFormProps>
   return (
     <div className="space-y-6">
       <Card className="border-none bg-transparent shadow-none p-0">
-        <CardHeader className='p-0'>
-          <CardDescription>
-            Configure when your agent should be triggered automatically. Choose from quick presets, recurring schedules, or set up advanced cron expressions.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-0 pt-4">
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-            <div className="space-y-6">
+        <CardContent className="p-0 pb-3">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div className="space-y-4">
               <div>
                 <h3 className="text-sm font-medium mb-4 flex items-center gap-2">
                   <Target className="h-4 w-4" />
                   Trigger Details
                 </h3>
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="trigger-name">Name *</Label>
+                <div className="space-y-3">
+                  <div>
                     <Input
-                      id="trigger-name"
                       value={name}
                       onChange={(e) => onNameChange(e.target.value)}
-                      placeholder="Enter a name for this trigger"
-                      className={errors.name ? 'border-destructive' : ''}
+                      placeholder="Trigger name"
+                      className={cn("w-full", errors.name && 'border-destructive')}
                     />
-                    {errors.name && (
-                      <p className="text-sm text-destructive">{errors.name}</p>
-                    )}
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="trigger-description">Description</Label>
+                  <div>
                     <Textarea
-                      id="trigger-description"
                       value={description}
                       onChange={(e) => onDescriptionChange(e.target.value)}
-                      placeholder="Optional description for this trigger"
-                      rows={2}
+                      placeholder="Description (optional)"
+                      rows={1}
+                      className="text-sm"
                     />
                   </div>
 
@@ -400,243 +295,134 @@ export const ScheduleTriggerConfigForm: React.FC<ScheduleTriggerConfigFormProps>
                       checked={isActive}
                       onCheckedChange={onActiveChange}
                     />
-                    <Label htmlFor="trigger-active">
+                    <Label htmlFor="trigger-active" className="font-medium">
                       Enable trigger immediately
                     </Label>
                   </div>
+
+                  {errors.name && (
+                    <p className="text-xs text-destructive">{errors.name}</p>
+                  )}
                 </div>
               </div>
 
               <div>
                 <h3 className="text-sm font-medium mb-4 flex items-center gap-2">
                   <Zap className="h-4 w-4" />
-                  Execution Configuration
+                  Agent Prompt
                 </h3>
-                <div className="space-y-4">
-                  <div>
-                    <Label className="text-sm font-medium mb-3 block">
-                      Execution Type *
-                    </Label>
-                    <RadioGroup value={config.execution_type || 'agent'} onValueChange={handleExecutionTypeChange}>
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="agent" id="execution-agent" />
-                        <Label htmlFor="execution-agent">Execute Agent</Label>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="workflow" id="execution-workflow" />
-                        <Label htmlFor="execution-workflow">Execute Workflow</Label>
-                      </div>
-                    </RadioGroup>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Choose whether to execute the agent directly or run a specific workflow.
-                    </p>
-                  </div>
-
-                  {config.execution_type === 'workflow' ? (
-                    <div className="space-y-4">
-                      <div>
-                        <Label htmlFor="workflow_id" className="text-sm font-medium">
-                          Workflow *
-                        </Label>
-                        <Select value={config.workflow_id || ''} onValueChange={handleWorkflowChange}>
-                          <SelectTrigger className={cn('max-w-[28rem] w-full overflow-hidden', errors.workflow_id ? 'border-destructive' : '')}>
-                            <SelectValue className="truncate" placeholder="Select a workflow" />
-                          </SelectTrigger>
-                          <SelectContent className="max-w-[28rem]">
-                            {isLoadingWorkflows ? (
-                              <SelectItem value="__loading__" disabled>Loading workflows...</SelectItem>
-                            ) : workflows.length === 0 ? (
-                              <SelectItem value="__no_workflows__" disabled>No workflows available</SelectItem>
-                            ) : (
-                              workflows.filter(w => w.status === 'active').map((workflow) => (
-                                <SelectItem key={workflow.id} value={workflow.id}>
-                                  <span className="block truncate max-w-[26rem]">{workflow.name}</span>
-                                </SelectItem>
-                              ))
-                            )}
-                          </SelectContent>
-                        </Select>
-                        {errors.workflow_id && (
-                          <p className="text-xs text-destructive mt-1">{errors.workflow_id}</p>
-                        )}
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Select the workflow to execute when triggered.
-                        </p>
-                      </div>
-
-                      {templateText ? (
-                        <div className="rounded-xl border p-3 bg-muted/30 max-h-[160px] overflow-y-auto">
-                          <p className="text-xs text-muted-foreground whitespace-pre-wrap">{templateText}</p>
-                        </div>
-                      ) : null}
-
-                      {variableSpecs && variableSpecs.length > 0 ? (
-                        <div className="space-y-3">
-                          {variableSpecs.map((v) => (
-                            <div key={v.key} className="space-y-1">
-                              <Label htmlFor={`v-${v.key}`}>{v.label}</Label>
-                              <Input
-                                id={`v-${v.key}`}
-                                type={v.type === 'number' ? 'number' : 'text'}
-                                value={(config.workflow_input?.[v.key] ?? '') as any}
-                                onChange={(e) => handleVarChange(v.key, v.type === 'number' ? Number(e.target.value) : e.target.value)}
-                                placeholder={v.helperText || ''}
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div>
-                          <Label htmlFor="workflow_input" className="text-sm font-medium">
-                            Instructions for Workflow
-                          </Label>
-                          <Textarea
-                            id="workflow_input"
-                            value={config.workflow_input?.prompt || config.workflow_input?.message || ''}
-                            onChange={(e) => {
-                              onChange({
-                                ...config,
-                                workflow_input: { prompt: e.target.value },
-                              });
-                            }}
-                            placeholder="Write what you want the workflow to do..."
-                            rows={4}
-                            className={errors.workflow_input ? 'border-destructive' : ''}
-                          />
-                          {errors.workflow_input && (
-                            <p className="text-xs text-destructive mt-1">{errors.workflow_input}</p>
-                          )}
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Simply describe what you want the workflow to accomplish. The workflow will interpret your instructions naturally.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div>
-                      <Label htmlFor="agent_prompt" className="text-sm font-medium">
-                        Agent Prompt *
-                      </Label>
-                      <Textarea
-                        id="agent_prompt"
-                        value={config.agent_prompt || ''}
-                        onChange={(e) => handleAgentPromptChange(e.target.value)}
-                        placeholder="Enter the prompt that will be sent to your agent when triggered..."
-                        rows={4}
-                        className={errors.agent_prompt ? 'border-destructive' : ''}
-                      />
-                      {errors.agent_prompt && (
-                        <p className="text-xs text-destructive mt-1">{errors.agent_prompt}</p>
-                      )}
-                      <p className="text-xs text-muted-foreground mt-1">
-                        This prompt will be sent to your agent each time the schedule triggers.
-                      </p>
-                    </div>
+                <div className="space-y-3">
+                  <Label htmlFor="agent-prompt" className="text-sm">Instructions for the agent when this trigger fires</Label>
+                  <Textarea
+                    id="agent-prompt"
+                    value={config.agent_prompt || ''}
+                    onChange={(e) => handleAgentPromptChange(e.target.value)}
+                    placeholder="Enter instructions for the agent to execute..."
+                    rows={3}
+                    className={errors.agent_prompt ? 'border-destructive' : ''}
+                  />
+                  {errors.agent_prompt && (
+                    <p className="text-xs text-destructive">{errors.agent_prompt}</p>
                   )}
                 </div>
               </div>
             </div>
-            <div className="space-y-6">
+            <div className="space-y-4">
               <div>
                 <h3 className="text-sm font-medium mb-4 flex items-center gap-2">
                   <Clock className="h-4 w-4" />
                   Schedule Configuration
                 </h3>
-
-                <div className="space-y-4">
+                <div className="space-y-3">
                   <div>
-                    <Label htmlFor="timezone" className="text-sm font-medium">
-                      Timezone
-                      <span className="text-xs text-muted-foreground ml-2">
-                        (Auto-detected: {Intl.DateTimeFormat().resolvedOptions().timeZone})
-                      </span>
-                    </Label>
-                    <Select value={config.timezone || 'UTC'} onValueChange={handleTimezoneChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select timezone" />
+                    <Label htmlFor="timezone" className="text-sm font-medium mb-2 block">Timezone</Label>
+                    <Select
+                      value={
+                        config.timezone === Intl.DateTimeFormat().resolvedOptions().timeZone
+                          ? 'auto'
+                          : config.timezone || 'auto'
+                      }
+                      onValueChange={(value) => {
+                        if (value === 'auto') {
+                          const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                          onChange({ ...config, timezone: detectedTimezone });
+                        } else {
+                          onChange({ ...config, timezone: value });
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="auto">
+                          Auto ({Intl.DateTimeFormat().resolvedOptions().timeZone})
+                        </SelectItem>
                         {TIMEZONES.map((tz) => (
                           <SelectItem key={tz.value} value={tz.value}>
-                            <div className="flex items-center justify-between w-full">
-                              <span>{tz.label}</span>
-                              <span className="text-xs text-muted-foreground ml-2">
-                                {new Date().toLocaleTimeString('en-US', {
-                                  timeZone: tz.value,
-                                  hour12: false,
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })}
-                              </span>
-                            </div>
+                            {tz.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    {config.timezone && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Current time: {new Date().toLocaleString('en-US', {
-                          timeZone: config.timezone,
-                          hour12: true,
-                          weekday: 'short',
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </p>
-                    )}
                   </div>
 
                   <Tabs value={scheduleType} onValueChange={(value) => setScheduleType(value as ScheduleType)} className="w-full">
                     <TabsList className="grid w-full grid-cols-4">
-                      <TabsTrigger value="quick" className="flex items-center gap-1 px-2">
+                      <TabsTrigger value="quick" className="flex items-center gap-1">
                         <Zap className="h-4 w-4" />
                         <span className="hidden sm:inline">Quick</span>
                       </TabsTrigger>
-                      <TabsTrigger value="recurring" className="flex items-center gap-1 px-2">
+                      <TabsTrigger value="recurring" className="flex items-center gap-1">
                         <Repeat className="h-4 w-4" />
                         <span className="hidden sm:inline">Recurring</span>
                       </TabsTrigger>
-                      <TabsTrigger value="one-time" className="flex items-center gap-1 px-2">
+                      <TabsTrigger value="one-time" className="flex items-center gap-1">
                         <CalendarIcon className="h-4 w-4" />
                         <span className="hidden sm:inline">One-time</span>
                       </TabsTrigger>
-                      <TabsTrigger value="advanced" className="flex items-center gap-1 px-2">
+                      <TabsTrigger value="advanced" className="flex items-center gap-1">
                         <Target className="h-4 w-4" />
                         <span className="hidden sm:inline">Advanced</span>
                       </TabsTrigger>
                     </TabsList>
 
-                    <TabsContent value="quick" className="space-y-4 mt-6">
-                      <div className="space-y-4">
-                        {Object.entries(groupedPresets).map(([category, presets]) => (
-                          <div key={category}>
-                            <h4 className="text-sm font-medium mb-3 capitalize">{category} Schedules</h4>
-                            <div className="grid grid-cols-1 gap-2">
-                              {presets.map((preset) => (
-                                <Card
-                                  key={preset.cron}
-                                  className={cn(
-                                    "p-0 cursor-pointer transition-colors hover:bg-accent",
-                                    selectedPreset === preset.cron && "ring-2 ring-primary bg-accent"
-                                  )}
-                                  onClick={() => handlePresetSelect(preset)}
-                                >
-                                  <CardContent className="p-3">
-                                    <div className="flex items-center gap-3">
-                                      <div className="text-primary">{preset.icon}</div>
-                                      <div className="flex-1">
-                                        <div className="font-medium text-sm">{preset.name}</div>
-                                        <div className="text-xs text-muted-foreground">{preset.description}</div>
-                                      </div>
-                                    </div>
-                                  </CardContent>
-                                </Card>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
+                    <TabsContent value="quick" className="mt-4">
+                      <div className="space-y-3">
+                        <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="frequent">⚡ Frequent</SelectItem>
+                            <SelectItem value="daily">🎯 Daily</SelectItem>
+                            <SelectItem value="weekly">📅 Weekly</SelectItem>
+                            <SelectItem value="monthly">📅 Monthly</SelectItem>
+                          </SelectContent>
+                        </Select>
+
+                        <div className="grid grid-cols-1 gap-2">
+                          {groupedPresets[selectedCategory]?.map((preset) => (
+                            <Card
+                              key={preset.cron}
+                              className={cn(
+                                "p-0 cursor-pointer shadow-none transition-colors hover:bg-accent",
+                                selectedPreset === preset.cron && "ring-2 ring-primary bg-accent"
+                              )}
+                              onClick={() => handlePresetSelect(preset)}
+                            >
+                              <CardContent className="p-3">
+                                <div className="flex items-center gap-3">
+                                  <div className="text-primary">{preset.icon}</div>
+                                  <div className="flex-1">
+                                    <div className="font-medium text-sm">{preset.name}</div>
+                                    <div className="text-xs text-muted-foreground">{preset.description}</div>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
                       </div>
                     </TabsContent>
 
@@ -838,7 +624,7 @@ export const ScheduleTriggerConfigForm: React.FC<ScheduleTriggerConfigFormProps>
                             ✓ {getSchedulePreview()}
                           </p>
                         )}
-                        <Card className="mt-3 p-0 py-4">
+                        <Card className="mt-3 p-0 py-4 shadow-none">
                           <CardContent>
                             <div className="flex items-center gap-2 mb-2">
                               <Info className="h-4 w-4 text-muted-foreground" />
@@ -854,28 +640,6 @@ export const ScheduleTriggerConfigForm: React.FC<ScheduleTriggerConfigFormProps>
                       </div>
                     </TabsContent>
                   </Tabs>
-                  {config.cron_expression && (
-                    <div className="border rounded-lg p-4 bg-muted/30">
-                      <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
-                        <Info className="h-4 w-4" />
-                        Schedule Preview
-                      </h4>
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Clock className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-sm">{getSchedulePreview()}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <CalendarIcon className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-sm">{config.timezone || 'UTC'}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Target className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-sm capitalize">{config.execution_type || 'agent'} execution</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>

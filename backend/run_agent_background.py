@@ -7,44 +7,70 @@ import json
 import traceback
 from datetime import datetime, timezone
 from typing import Optional
-from services import redis
-from agent.run import run_agent
-from utils.logger import logger, structlog
+from core.services import redis_worker as redis
+from core.run import run_agent
+from core.utils.logger import logger, structlog
+from core.utils.tool_discovery import warm_up_tools_cache
 import dramatiq
 import uuid
-from agentpress.thread_manager import ThreadManager
-from services.supabase import DBConnection
-from services import redis
+from core.agentpress.thread_manager import ThreadManager
+from core.services.supabase import DBConnection
 from dramatiq.brokers.redis import RedisBroker
+from core.services.langfuse import langfuse
+from core.utils.retry import retry
 import os
-from services.langfuse import langfuse
-from utils.retry import retry
 
 import sentry_sdk
 from typing import Dict, Any
 
-redis_host = os.getenv('REDIS_HOST', 'redis')
-redis_port = int(os.getenv('REDIS_PORT', 6379))
-redis_broker = RedisBroker(host=redis_host, port=redis_port, middleware=[dramatiq.middleware.AsyncIO()])
+# Get Redis configuration from centralized service
+# Note: Using redis_worker for operations, but get_redis_config is shared
+from core.services.redis import get_redis_config as _get_redis_config
+redis_config = _get_redis_config()
+redis_host = redis_config["host"]
+redis_port = redis_config["port"]
+redis_password = redis_config["password"]
+redis_username = redis_config["username"]
+
+# Configure Dramatiq broker using centralized Redis config
+# Use URL format if username/password are provided (required for Redis Cloud)
+if redis_config["url"]:
+    auth_info = f" (user={redis_username})" if redis_username else ""
+    logger.info(f"🔧 Configuring Dramatiq broker with Redis at {redis_host}:{redis_port}{auth_info}")
+    redis_broker = RedisBroker(url=redis_config["url"], middleware=[dramatiq.middleware.AsyncIO()])
+else:
+    logger.info(f"🔧 Configuring Dramatiq broker with Redis at {redis_host}:{redis_port}")
+    redis_broker = RedisBroker(host=redis_host, port=redis_port, middleware=[dramatiq.middleware.AsyncIO()])
 
 dramatiq.set_broker(redis_broker)
 
+# 🔥 WARMUP AT WORKER STARTUP (not on first request)
+warm_up_tools_cache()
+logger.info("✅ Worker process ready, tool cache warmed")
 
 _initialized = False
 db = DBConnection()
-instance_id = "single"
+instance_id = ""
 
 async def initialize():
-    """Initialize the agent API with resources from the main API."""
+    """Initialize async resources (Redis, DB) on first request.
+    
+    Note: Tool cache warmup already happened at module import time.
+    """
     global db, instance_id, _initialized
 
+    if _initialized:
+        return  # Already initialized
+    
     if not instance_id:
         instance_id = str(uuid.uuid4())[:8]
+    
+    logger.info(f"Initializing worker async resources with Redis at {redis_host}:{redis_port}")
     await retry(lambda: redis.initialize_async())
     await db.initialize()
 
     _initialized = True
-    logger.info(f"Initialized agent API with instance ID: {instance_id}")
+    logger.info(f"✅ Worker async resources initialized successfully (instance: {instance_id})")
 
 @dramatiq.actor
 async def check_health(key: str):
@@ -56,17 +82,11 @@ async def check_health(key: str):
 async def run_agent_background(
     agent_run_id: str,
     thread_id: str,
-    instance_id: str, # Use the global instance ID passed during initialization
+    instance_id: str,
     project_id: str,
-    model_name: str,
-    enable_thinking: Optional[bool],
-    reasoning_effort: Optional[str],
-    stream: bool,
-    enable_context_manager: bool,
-    agent_config: Optional[dict] = None,
-    is_agent_builder: Optional[bool] = False,
-    target_agent_id: Optional[str] = None,
-    request_id: Optional[str] = None,
+    model_name: str = "openai/gpt-5-mini",
+    agent_id: Optional[str] = None,  # Changed from agent_config to agent_id
+    request_id: Optional[str] = None
 ):
     """Run the agent in the background using Redis for state."""
     structlog.contextvars.clear_contextvars()
@@ -89,11 +109,39 @@ async def run_agent_background(
     lock_acquired = await redis.set(run_lock_key, instance_id, nx=True, ex=redis.REDIS_KEY_TTL)
     
     if not lock_acquired:
-        # Check if the run is already being handled by another instance
+        # Lock exists - check if it's stale (previous worker crashed)
         existing_instance = await redis.get(run_lock_key)
-        if existing_instance:
-            logger.info(f"Agent run {agent_run_id} is already being processed by instance {existing_instance.decode() if isinstance(existing_instance, bytes) else existing_instance}. Skipping duplicate execution.")
-            return
+        existing_instance_str = existing_instance.decode() if isinstance(existing_instance, bytes) else existing_instance if existing_instance else None
+        
+        if existing_instance_str:
+            # Check if the instance that holds the lock is still alive
+            instance_active_key = f"active_run:{existing_instance_str}:{agent_run_id}"
+            instance_still_alive = await redis.get(instance_active_key)
+            
+            # Also check database status to see if run is actually running
+            client = await db.client
+            db_run_status = None
+            try:
+                run_result = await client.table('agent_runs').select('status').eq('id', agent_run_id).maybe_single().execute()
+                if run_result.data:
+                    db_run_status = run_result.data.get('status')
+            except Exception as db_err:
+                logger.warning(f"Failed to check database status for {agent_run_id}: {db_err}")
+            
+            # If instance is still alive OR run is still running in DB, skip
+            if instance_still_alive or db_run_status == 'running':
+                logger.info(f"Agent run {agent_run_id} is already being processed by instance {existing_instance_str}. Skipping duplicate execution.")
+                return
+            else:
+                # Stale lock detected - the instance is dead and run is not running
+                logger.warning(f"Stale lock detected for {agent_run_id} (instance {existing_instance_str} is dead, DB status: {db_run_status}). Attempting to acquire lock.")
+                # Try to delete the stale lock and acquire it
+                await redis.delete(run_lock_key)
+                lock_acquired = await redis.set(run_lock_key, instance_id, nx=True, ex=redis.REDIS_KEY_TTL)
+                if not lock_acquired:
+                    # Race condition - another worker got it first
+                    logger.info(f"Another worker acquired lock for {agent_run_id} while cleaning up stale lock. Skipping.")
+                    return
         else:
             # Lock exists but no value, try to acquire again
             lock_acquired = await redis.set(run_lock_key, instance_id, nx=True, ex=redis.REDIS_KEY_TTL)
@@ -104,42 +152,22 @@ async def run_agent_background(
     sentry.sentry.set_tag("thread_id", thread_id)
 
     logger.info(f"Starting background agent run: {agent_run_id} for thread: {thread_id} (Instance: {instance_id})")
-    logger.info({
-        "model_name": model_name,
-        "enable_thinking": enable_thinking,
-        "reasoning_effort": reasoning_effort,
-        "stream": stream,
-        "enable_context_manager": enable_context_manager,
-        "agent_config": agent_config,
-        "is_agent_builder": is_agent_builder,
-        "target_agent_id": target_agent_id,
-    })
     
-    effective_model = model_name
-    if model_name == "anthropic/claude-sonnet-4-20250514" and agent_config and agent_config.get('model'):
-        agent_model = agent_config['model']
-        from utils.constants import MODEL_NAME_ALIASES
-        resolved_agent_model = MODEL_NAME_ALIASES.get(agent_model, agent_model)
-        effective_model = resolved_agent_model
-        logger.info(f"Using model from agent config: {agent_model} -> {effective_model} (no user selection)")
-    else:
-        from utils.constants import MODEL_NAME_ALIASES
-        effective_model = MODEL_NAME_ALIASES.get(model_name, model_name)
-        if model_name != "anthropic/claude-sonnet-4-20250514":
-            logger.info(f"Using user-selected model: {model_name} -> {effective_model}")
-        else:
-            logger.info(f"Using default model: {effective_model}")
-    
-    logger.info(f"🚀 Using model: {effective_model} (thinking: {enable_thinking}, reasoning_effort: {reasoning_effort})")
-    if agent_config:
-        logger.info(f"Using custom agent: {agent_config.get('name', 'Unknown')}")
+    from core.ai_models import model_manager
 
+    effective_model = model_manager.resolve_model_id(model_name)
+    
+    logger.info(f"🚀 Using model: {effective_model}")
+    
     client = await db.client
     start_time = datetime.now(timezone.utc)
     total_responses = 0
     pubsub = None
     stop_checker = None
     stop_signal_received = False
+    
+    # Create cancellation event to signal LLM to stop
+    cancellation_event = asyncio.Event()
 
     # Define Redis keys and channels
     response_list_key = f"agent_run:{agent_run_id}:responses"
@@ -158,8 +186,10 @@ async def run_agent_background(
                     data = message.get("data")
                     if isinstance(data, bytes): data = data.decode('utf-8')
                     if data == "STOP":
-                        logger.info(f"Received STOP signal for agent run {agent_run_id} (Instance: {instance_id})")
+                        logger.debug(f"Received STOP signal for agent run {agent_run_id} (Instance: {instance_id})")
                         stop_signal_received = True
+                        # Set cancellation event to stop LLM execution immediately
+                        cancellation_event.set()
                         break
                 # Periodically refresh the active run key TTL
                 if total_responses % 50 == 0: # Refresh every 50 responses or so
@@ -167,12 +197,13 @@ async def run_agent_background(
                     except Exception as ttl_err: logger.warning(f"Failed to refresh TTL for {instance_active_key}: {ttl_err}")
                 await asyncio.sleep(0.1) # Short sleep to prevent tight loop
         except asyncio.CancelledError:
-            logger.info(f"Stop signal checker cancelled for {agent_run_id} (Instance: {instance_id})")
+            logger.debug(f"Stop signal checker cancelled for {agent_run_id} (Instance: {instance_id})")
         except Exception as e:
             logger.error(f"Error in stop signal checker for {agent_run_id}: {e}", exc_info=True)
             stop_signal_received = True # Stop the run if the checker fails
 
     trace = langfuse.trace(name="agent_run", id=agent_run_id, session_id=thread_id, metadata={"project_id": project_id, "instance_id": instance_id})
+
     try:
         # Setup Pub/Sub listener for control signals
         pubsub = await redis.create_pubsub()
@@ -182,52 +213,77 @@ async def run_agent_background(
             logger.error(f"Redis failed to subscribe to control channels: {e}", exc_info=True)
             raise e
 
-        logger.debug(f"Subscribed to control channels: {instance_control_channel}, {global_control_channel}")
+        logger.info(f"Subscribed to control channels: {instance_control_channel}, {global_control_channel}")
         stop_checker = asyncio.create_task(check_for_stop_signal())
 
         # Ensure active run key exists and has TTL
         await redis.set(instance_active_key, "running", ex=redis.REDIS_KEY_TTL)
 
+        # Fetch agent_config from agent_id if provided
+        agent_config = None
+        if agent_id:
+            try:
+                # Get account_id from agent to load config
+                agent_result = await client.table('agents').select('account_id').eq('agent_id', agent_id).single().execute()
+                if agent_result.data:
+                    account_id = agent_result.data['account_id']
+                    from core.agent_runs import _load_agent_config
+                    agent_config = await _load_agent_config(client, agent_id, account_id, account_id, is_new_thread=False)
+                    logger.debug(f"Fetched agent config for agent_id: {agent_id}")
+                else:
+                    logger.warning(f"Agent not found for agent_id: {agent_id}")
+            except Exception as e:
+                logger.warning(f"Failed to fetch agent config for agent_id {agent_id}: {e}. Using default config.")
 
-        # Initialize agent generator
+        # Initialize agent generator with cancellation event
         agent_gen = run_agent(
-            thread_id=thread_id, project_id=project_id, stream=stream,
+            thread_id=thread_id, project_id=project_id,
             model_name=effective_model,
-            enable_thinking=enable_thinking, reasoning_effort=reasoning_effort,
-            enable_context_manager=enable_context_manager,
             agent_config=agent_config,
             trace=trace,
-            is_agent_builder=is_agent_builder,
-            target_agent_id=target_agent_id
+            cancellation_event=cancellation_event,
         )
 
         final_status = "running"
         error_message = None
 
+        # Push each response immediately for lowest latency streaming
+        # Semaphore in redis_worker limits concurrent operations to prevent connection exhaustion
         pending_redis_operations = []
 
         async for response in agent_gen:
             if stop_signal_received:
-                logger.info(f"Agent run {agent_run_id} stopped by signal.")
+                logger.debug(f"Agent run {agent_run_id} stopped by signal.")
                 final_status = "stopped"
                 trace.span(name="agent_run_stopped").end(status_message="agent_run_stopped", level="WARNING")
                 break
 
-            # Store response in Redis list and publish notification
+            # Push response immediately to Redis for real-time streaming
+            # Semaphore in redis_worker ensures we don't exhaust connections
             response_json = json.dumps(response)
-            pending_redis_operations.append(asyncio.create_task(redis.rpush(response_list_key, response_json)))
-            pending_redis_operations.append(asyncio.create_task(redis.publish(response_channel, "new")))
+            pending_redis_operations.append(
+                asyncio.create_task(redis.rpush(response_list_key, response_json))
+            )
+            # Publish notification immediately so stream endpoint picks it up right away
+            pending_redis_operations.append(
+                asyncio.create_task(redis.publish(response_channel, "new"))
+            )
             total_responses += 1
 
             # Check for agent-signaled completion or error
             if response.get('type') == 'status':
                  status_val = response.get('status')
-                 if status_val in ['completed', 'failed', 'stopped']:
-                     logger.info(f"Agent run {agent_run_id} finished via status message: {status_val}")
-                     final_status = status_val
-                     if status_val == 'failed' or status_val == 'stopped':
+                 # logger.debug(f"Agent status: {status_val}")
+                 
+                 if status_val in ['completed', 'failed', 'stopped', 'error']:
+                     logger.info(f"Agent run {agent_run_id} finished with status: {status_val}")
+                     final_status = status_val if status_val != 'error' else 'failed'
+                     if status_val in ['failed', 'stopped', 'error']:
                          error_message = response.get('message', f"Run ended with status: {status_val}")
+                         logger.error(f"Agent run failed: {error_message}")
                      break
+
+        # All responses already pushed immediately above - no batch to flush
 
         # If loop finished without explicit completion/error/stop signal, mark as completed
         if final_status == "running":
@@ -271,15 +327,6 @@ async def run_agent_background(
         except Exception as redis_err:
              logger.error(f"Failed to push error response to Redis for {agent_run_id}: {redis_err}")
 
-        # Fetch final responses (including the error)
-        all_responses = []
-        try:
-             all_responses_json = await redis.lrange(response_list_key, 0, -1)
-             all_responses = [json.loads(r) for r in all_responses_json]
-        except Exception as fetch_err:
-             logger.error(f"Failed to fetch responses from Redis after error for {agent_run_id}: {fetch_err}")
-             all_responses = [error_response] # Use the error message we tried to push
-
         # Update DB status
         await update_agent_run_status(client, agent_run_id, "failed", error=f"{error_message}\n{traceback_str}")
 
@@ -298,12 +345,23 @@ async def run_agent_background(
             except asyncio.CancelledError: pass
             except Exception as e: logger.warning(f"Error during stop_checker cancellation: {e}")
 
-        # Close pubsub connection
+        # Close pubsub connection - ensure it always happens
         if pubsub:
+            pubsub_cleaned = False
             try:
                 await pubsub.unsubscribe()
                 await pubsub.close()
+                pubsub_cleaned = True
                 logger.debug(f"Closed pubsub connection for {agent_run_id}")
+            except asyncio.CancelledError:
+                # Still cleanup on cancellation
+                if not pubsub_cleaned:
+                    try:
+                        await pubsub.unsubscribe()
+                        await pubsub.close()
+                        logger.debug(f"Closed pubsub connection after cancellation for {agent_run_id}")
+                    except Exception:
+                        pass  # Ignore errors during cancellation cleanup
             except Exception as e:
                 logger.warning(f"Error closing pubsub for {agent_run_id}: {str(e)}")
 
@@ -311,7 +369,7 @@ async def run_agent_background(
         await _cleanup_redis_response_list(agent_run_id)
 
         # Remove the instance-specific active run key
-        await _cleanup_redis_instance_key(agent_run_id)
+        await _cleanup_redis_instance_key(agent_run_id, instance_id)
 
         # Clean up the run lock
         await _cleanup_redis_run_lock(agent_run_id)
@@ -322,28 +380,28 @@ async def run_agent_background(
         except asyncio.TimeoutError:
             logger.warning(f"Timeout waiting for pending Redis operations for {agent_run_id}")
 
-        logger.info(f"Agent run background task fully completed for: {agent_run_id} (Instance: {instance_id}) with final status: {final_status}")
+        logger.debug(f"Agent run background task fully completed for: {agent_run_id} (Instance: {instance_id}) with final status: {final_status}")
 
-async def _cleanup_redis_instance_key(agent_run_id: str):
+async def _cleanup_redis_instance_key(agent_run_id: str, instance_id: str):
     """Clean up the instance-specific Redis key for an agent run."""
     if not instance_id:
         logger.warning("Instance ID not set, cannot clean up instance key.")
         return
     key = f"active_run:{instance_id}:{agent_run_id}"
-    logger.debug(f"Cleaning up Redis instance key: {key}")
+    # logger.debug(f"Cleaning up Redis instance key: {key}")
     try:
         await redis.delete(key)
-        logger.debug(f"Successfully cleaned up Redis key: {key}")
+        # logger.debug(f"Successfully cleaned up Redis key: {key}")
     except Exception as e:
         logger.warning(f"Failed to clean up Redis key {key}: {str(e)}")
 
 async def _cleanup_redis_run_lock(agent_run_id: str):
     """Clean up the run lock Redis key for an agent run."""
     run_lock_key = f"agent_run_lock:{agent_run_id}"
-    logger.debug(f"Cleaning up Redis run lock key: {run_lock_key}")
+    # logger.debug(f"Cleaning up Redis run lock key: {run_lock_key}")
     try:
         await redis.delete(run_lock_key)
-        logger.debug(f"Successfully cleaned up Redis run lock key: {run_lock_key}")
+        # logger.debug(f"Successfully cleaned up Redis run lock key: {run_lock_key}")
     except Exception as e:
         logger.warning(f"Failed to clean up Redis run lock key {run_lock_key}: {str(e)}")
 
@@ -355,7 +413,7 @@ async def _cleanup_redis_response_list(agent_run_id: str):
     response_list_key = f"agent_run:{agent_run_id}:responses"
     try:
         await redis.expire(response_list_key, REDIS_RESPONSE_LIST_TTL)
-        logger.debug(f"Set TTL ({REDIS_RESPONSE_LIST_TTL}s) on response list: {response_list_key}")
+        # logger.debug(f"Set TTL ({REDIS_RESPONSE_LIST_TTL}s) on response list: {response_list_key}")
     except Exception as e:
         logger.warning(f"Failed to set TTL on response list {response_list_key}: {str(e)}")
 
@@ -378,22 +436,20 @@ async def update_agent_run_status(
         if error:
             update_data["error"] = error
 
-
-
         # Retry up to 3 times
         for retry in range(3):
             try:
                 update_result = await client.table('agent_runs').update(update_data).eq("id", agent_run_id).execute()
 
                 if hasattr(update_result, 'data') and update_result.data:
-                    logger.info(f"Successfully updated agent run {agent_run_id} status to '{status}' (retry {retry})")
+                    # logger.debug(f"Successfully updated agent run {agent_run_id} status to '{status}' (retry {retry})")
 
                     # Verify the update
                     verify_result = await client.table('agent_runs').select('status', 'completed_at').eq("id", agent_run_id).execute()
                     if verify_result.data:
                         actual_status = verify_result.data[0].get('status')
                         completed_at = verify_result.data[0].get('completed_at')
-                        logger.info(f"Verified agent run update: status={actual_status}, completed_at={completed_at}")
+                        # logger.debug(f"Verified agent run update: status={actual_status}, completed_at={completed_at}")
                     return True
                 else:
                     logger.warning(f"Database update returned no data for agent run {agent_run_id} on retry {retry}: {update_result}")

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Zap, Server, Store } from 'lucide-react'
+import { Zap, Server, Store, Settings } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MCPConfigurationProps, MCPConfiguration as MCPConfigurationType } from './types';
 import { ConfiguredMcpList } from './configured-mcp-list';
@@ -28,10 +28,6 @@ export const MCPConfigurationNew: React.FC<MCPConfigurationProps> = ({
   const [selectedMCPForTools, setSelectedMCPForTools] = useState<MCPConfigurationType | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | undefined>(agentId);
   const queryClient = useQueryClient();
-
-  useEffect(() => {
-    setSelectedAgentId(agentId);
-  }, [agentId]);
 
   const handleAgentChange = (newAgentId: string | undefined) => {
     setSelectedAgentId(newAgentId);
@@ -64,8 +60,7 @@ export const MCPConfigurationNew: React.FC<MCPConfigurationProps> = ({
   };
 
   const handleRemoveMCP = (index: number) => {
-    const newMCPs = [...configuredMCPs];
-    newMCPs.splice(index, 1);
+    const newMCPs = configuredMCPs.filter((_, i) => i !== index);
     onConfigurationChange(newMCPs);
   };
 
@@ -84,17 +79,18 @@ export const MCPConfigurationNew: React.FC<MCPConfigurationProps> = ({
 
   const handleToolsSelected = (profileId: string, selectedTools: string[], appName: string, appSlug: string) => {
     setShowRegistryDialog(false);
-    queryClient.invalidateQueries({ queryKey: ['agents'] });
-    queryClient.invalidateQueries({ queryKey: ['agent', selectedAgentId] });
+    if (selectedAgentId) {
+      queryClient.invalidateQueries({ queryKey: ['agents', 'detail', selectedAgentId] });
+    }
     queryClient.invalidateQueries({ queryKey: ['composio', 'profiles'] });
     toast.success(`Connected ${appName} integration!`);
   };
 
   const handleCustomToolsUpdate = (enabledTools: string[]) => {
     if (!selectedMCPForTools) return;
-    
-    const updatedMCPs = configuredMCPs.map(mcp => 
-      mcp === selectedMCPForTools 
+
+    const updatedMCPs = configuredMCPs.map(mcp =>
+      mcp === selectedMCPForTools
         ? { ...mcp, enabledTools }
         : mcp
     );
@@ -107,31 +103,31 @@ export const MCPConfigurationNew: React.FC<MCPConfigurationProps> = ({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex gap-2">
-          <Button onClick={() => setShowRegistryDialog(true)} size="sm" variant="default" className="gap-2">
+          <Button onClick={() => setShowRegistryDialog(true)} size="sm" variant="default" className="gap-2" type="button">
             <Store className="h-4 w-4" />
             Browse Apps
           </Button>
-          <Button onClick={() => setShowCustomDialog(true)} size="sm" variant="outline" className="gap-2">
+          <Button onClick={() => setShowCustomDialog(true)} size="sm" variant="outline" className="gap-2" type="button">
             <Server className="h-4 w-4" />
             Custom MCP
           </Button>
         </div>
       </div>
-      
+
       {configuredMCPs.length === 0 && (
-        <div className="text-center py-12 px-6 bg-muted/30 rounded-xl border-2 border-dashed border-border">
-          <div className="mx-auto w-12 h-12 bg-muted rounded-full flex items-center justify-center mb-4 border">
+        <div className="text-center py-12 px-6 ">
+          <div className="mx-auto w-12 h-12">
             <Server className="h-6 w-6 text-muted-foreground" />
           </div>
           <h4 className="text-sm font-semibold text-foreground mb-2">
             No integrations configured
           </h4>
           <p className="text-sm text-muted-foreground mb-6 max-w-sm mx-auto">
-            Browse the app registry to connect your apps through Composio or add custom MCP servers
+            Browse the app registry to connect your apps or add custom MCP servers
           </p>
         </div>
       )}
-      
+
       {configuredMCPs.length > 0 && (
         <div className="space-y-4">
           <ConfiguredMcpList
@@ -142,21 +138,22 @@ export const MCPConfigurationNew: React.FC<MCPConfigurationProps> = ({
           />
         </div>
       )}
-      
+
       <Dialog open={showRegistryDialog} onOpenChange={setShowRegistryDialog}>
         <DialogContent className="p-0 max-w-6xl h-[90vh] overflow-hidden">
           <DialogHeader className="sr-only">
             <DialogTitle>Select Integration</DialogTitle>
           </DialogHeader>
-          <ComposioRegistry 
-            showAgentSelector={false} 
-            selectedAgentId={selectedAgentId} 
-            onAgentChange={handleAgentChange} 
+          <ComposioRegistry
+            showAgentSelector={false}
+            selectedAgentId={selectedAgentId}
+            onAgentChange={handleAgentChange}
             onToolsSelected={handleToolsSelected}
             onClose={() => {
               setShowRegistryDialog(false);
-              queryClient.invalidateQueries({ queryKey: ['agents'] });
-              queryClient.invalidateQueries({ queryKey: ['agent', selectedAgentId] });
+              if (selectedAgentId) {
+                queryClient.invalidateQueries({ queryKey: ['agents', 'detail', selectedAgentId] });
+              }
             }}
           />
         </DialogContent>

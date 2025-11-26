@@ -45,13 +45,13 @@ import {
   XCircle,
   Trash2,
 } from 'lucide-react';
-import { useComposioCredentialsProfiles, useComposioMcpUrl } from '@/hooks/react-query/composio/use-composio-profiles';
-import { useDeleteProfile, useBulkDeleteProfiles, useSetDefaultProfile } from '@/hooks/react-query/composio/use-composio-mutations';
+import { useComposioCredentialsProfiles, useComposioMcpUrl } from '@/hooks/composio/use-composio-profiles';
+import { useDeleteProfile, useBulkDeleteProfiles, useSetDefaultProfile } from '@/hooks/composio/use-composio-mutations';
 import { ComposioRegistry } from './composio-registry';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
-import type { ComposioProfileSummary, ComposioToolkitGroup } from '@/hooks/react-query/composio/utils';
+import type { ComposioProfileSummary, ComposioToolkitGroup } from '@/hooks/composio/utils';
 
 interface ComposioConnectionsSectionProps {
   className?: string;
@@ -581,13 +581,9 @@ export const ComposioConnectionsSection: React.FC<ComposioConnectionsSectionProp
             <div className="text-center">
               <Settings className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-lg font-medium mb-2">No Connections</h3>
-              <p className="text-muted-foreground mb-4">
-                You haven't connected any applications yet.
+              <p className="text-muted-foreground">
+                Connect integrations to your agents and you will be able to manage them here.
               </p>
-              <Button variant="outline" onClick={() => setShowRegistry(true)}>
-                <Plus className="h-4 w-4" />
-                Connect Apps
-              </Button>
             </div>
           </CardContent>
         </Card>

@@ -1,7 +1,13 @@
 import { maintenanceNoticeFlag } from '@/lib/edge-flags';
-import { NextResponse } from 'next/server';
+
+export const runtime = 'edge';
 
 export async function GET() {
-  const maintenanceNotice = await maintenanceNoticeFlag();
-  return NextResponse.json(maintenanceNotice);
+  try {
+    const maintenanceNotice = await maintenanceNoticeFlag();
+    return Response.json(maintenanceNotice);
+  } catch (error) {
+    console.error('[API] Error in edge flags route:', error);
+    return Response.json({ enabled: false }, { status: 500 });
+  }
 }

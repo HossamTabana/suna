@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import GoogleSignIn from '@/components/GoogleSignIn';
-import { useMediaQuery } from '@/hooks/use-media-query';
+import { useMediaQuery } from '@/hooks/utils';
 import { useState, useEffect, Suspense } from 'react';
 import { signIn, signUp, forgotPassword } from './actions';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -14,12 +15,12 @@ import {
   CheckCircle,
   AlertCircle,
   MailCheck,
-  Loader2,
 } from 'lucide-react';
+import { KortixLoader } from '@/components/ui/kortix-loader';
 import { useAuth } from '@/components/AuthProvider';
-import { useAuthMethodTracking } from '@/lib/stores/auth-tracking';
+import { useAuthMethodTracking } from '@/stores/auth-tracking';
 import { toast } from 'sonner';
-import { useFeatureFlag } from '@/lib/feature-flags';
+import { useTranslations } from 'next-intl';
 
 import {
   Dialog,
@@ -31,7 +32,7 @@ import {
 } from '@/components/ui/dialog';
 import GitHubSignIn from '@/components/GithubSignIn';
 import { KortixLogo } from '@/components/sidebar/kortix-logo';
-import { Ripple } from '@/components/ui/ripple';
+import { AnimatedBg } from '@/components/ui/animated-bg';
 import { ReleaseBadge } from '@/components/auth/release-badge';
 
 function LoginContent() {
@@ -39,13 +40,14 @@ function LoginContent() {
   const searchParams = useSearchParams();
   const { user, isLoading } = useAuth();
   const mode = searchParams.get('mode');
-  const returnUrl = searchParams.get('returnUrl');
+  const returnUrl = searchParams.get('returnUrl') || searchParams.get('redirect');
   const message = searchParams.get('message');
-  const { enabled: customAgentsEnabled } = useFeatureFlag("custom_agents");
+  const t = useTranslations('auth');
 
   const isSignUp = mode === 'signup';
   const isMobile = useMediaQuery('(max-width: 768px)');
   const [mounted, setMounted] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   const { wasLastMethod: wasEmailLastMethod, markAsUsed: markEmailAsUsed } = useAuthMethodTracking('email');
 
@@ -86,11 +88,8 @@ function LoginContent() {
   const handleSignIn = async (prevState: any, formData: FormData) => {
     markEmailAsUsed();
 
-    if (returnUrl) {
-      formData.append('returnUrl', returnUrl);
-    } else {
-      formData.append('returnUrl', '/dashboard');
-    }
+    const finalReturnUrl = returnUrl || '/dashboard';
+    formData.append('returnUrl', finalReturnUrl);
     const result = await signIn(prevState, formData);
 
     if (
@@ -99,13 +98,13 @@ function LoginContent() {
       'success' in result &&
       result.success &&
       'redirectTo' in result
-      ) {
+    ) {
       window.location.href = result.redirectTo as string;
       return null;
     }
 
     if (result && typeof result === 'object' && 'message' in result) {
-      toast.error('Login failed', {
+      toast.error(t('signInFailed'), {
         description: result.message as string,
         duration: 5000,
       });
@@ -121,9 +120,8 @@ function LoginContent() {
     const email = formData.get('email') as string;
     setRegistrationEmail(email);
 
-    if (returnUrl) {
-      formData.append('returnUrl', returnUrl);
-    }
+    const finalReturnUrl = returnUrl || '/dashboard';
+    formData.append('returnUrl', finalReturnUrl);
 
     // Add origin for email redirects
     formData.append('origin', window.location.origin);
@@ -161,7 +159,7 @@ function LoginContent() {
 
         return result;
       } else {
-        toast.error('Sign up failed', {
+        toast.error(t('signUpFailed'), {
           description: resultMessage,
           duration: 5000,
         });
@@ -180,7 +178,7 @@ function LoginContent() {
     if (!forgotPasswordEmail || !forgotPasswordEmail.includes('@')) {
       setForgotPasswordStatus({
         success: false,
-        message: 'Please enter a valid email address',
+        message: t('pleaseEnterValidEmail'),
       });
       return;
     }
@@ -214,7 +212,7 @@ function LoginContent() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <KortixLoader size="large" />
       </div>
     );
   }
@@ -230,20 +228,20 @@ function LoginContent() {
             </div>
 
             <h1 className="text-3xl font-semibold text-foreground mb-4">
-              Check your email
+              {t('checkYourEmail')}
             </h1>
 
             <p className="text-muted-foreground mb-2">
-              We've sent a confirmation link to:
+              {t('confirmationLinkSent')}
             </p>
 
             <p className="text-lg font-medium mb-6">
-              {registrationEmail || 'your email address'}
+              {registrationEmail || t('emailAddress')}
             </p>
 
             <div className="bg-green-50 dark:bg-green-950/20 border border-green-100 dark:border-green-900/50 rounded-lg p-4 mb-8">
               <p className="text-sm text-green-800 dark:text-green-400">
-                Click the link in the email to activate your account. If you don't see the email, check your spam folder.
+                {t('clickLinkToActivate')}
               </p>
             </div>
 
@@ -252,13 +250,13 @@ function LoginContent() {
                 href="/"
                 className="flex h-11 items-center justify-center px-6 text-center rounded-lg border border-border bg-background hover:bg-accent transition-colors"
               >
-                Return to home
+                {t('returnToHome')}
               </Link>
               <button
                 onClick={resetRegistrationSuccess}
                 className="flex h-11 items-center justify-center px-6 text-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
               >
-                Back to sign in
+                {t('backToSignIn')}
               </button>
             </div>
           </div>
@@ -268,30 +266,20 @@ function LoginContent() {
   }
 
   return (
-      <div className="min-h-screen bg-background relative">
-        <div className="absolute top-6 left-6 z-10">
-          <Link href="/" className="flex items-center">
-            <KortixLogo size={28} />
-          </Link>
-        </div>
-        <div className="flex min-h-screen">
-          <div className="relative flex-1 flex items-center justify-center p-4 lg:p-8">
-            <div className="absolute top-6 right-10 z-10">
-              <Link
-                href="/"
-                className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back to home
-              </Link>
+    <div className="min-h-screen bg-background relative">
+      <div className="absolute top-6 left-6 z-10">
+        <Link href="/" className="flex items-center space-x-2">
+          <KortixLogo size={28} />
+        </Link>
+      </div>
+      <div className="flex min-h-screen">
+        <div className="relative flex-1 flex items-center justify-center p-4 lg:p-8">
+          <div className="w-full max-w-sm">
+            <div className="mb-4 flex items-center flex-col gap-3 sm:gap-4 justify-center">
+              <h1 className="text-xl sm:text-2xl font-semibold text-foreground text-center leading-tight">
+                {isSignUp ? t('createAccount') : t('logIntoAccount')}
+              </h1>
             </div>
-            <div className="w-full max-w-sm">
-              <div className="mb-4 flex items-center flex-col gap-3 sm:gap-4 justify-center">
-                {customAgentsEnabled && <ReleaseBadge className='mb-2 sm:mb-4' text="Custom Agents, Playbooks, and more!" link="/changelog" />}
-                <h1 className="text-xl sm:text-2xl font-semibold text-foreground text-center leading-tight">
-                  {isSignUp ? 'Create your account' : 'Log into your account'}
-                </h1>
-              </div>
             <div className="space-y-3 mb-4">
               <GoogleSignIn returnUrl={returnUrl || undefined} />
               <GitHubSignIn returnUrl={returnUrl || undefined} />
@@ -302,7 +290,7 @@ function LoginContent() {
               </div>
               <div className="relative flex justify-center text-sm">
                 <span className="px-2 bg-background text-muted-foreground">
-                  or email
+                  {t('orEmail')}
                 </span>
               </div>
             </div>
@@ -311,36 +299,78 @@ function LoginContent() {
                 id="email"
                 name="email"
                 type="email"
-                placeholder="Email address"
-                className="h-10 rounded-lg"
+                placeholder={t('emailAddress')}
+                className=""
                 required
               />
               <Input
                 id="password"
                 name="password"
                 type="password"
-                placeholder="Password"
-                className="h-10 rounded-lg"
+                placeholder={t('password')}
+                className=""
                 required
               />
               {isSignUp && (
-                <Input
-                  id="confirmPassword"
-                  name="confirmPassword"
-                  type="password"
-                  placeholder="Confirm password"
-                  className="h-10 rounded-lg"
-                  required
-                />
+                <>
+                  <Input
+                    id="confirmPassword"
+                    name="confirmPassword"
+                    type="password"
+                    placeholder={t('confirmPassword')}
+                    className=""
+                    required
+                  />
+                  
+                  {/* GDPR Consent Checkbox */}
+                  <div className="flex items-center gap-3 my-4">
+                    <Checkbox
+                      id="gdprConsent"
+                      checked={acceptedTerms}
+                      onCheckedChange={(checked) => setAcceptedTerms(checked === true)}
+                      required
+                    />
+                    <label 
+                      htmlFor="gdprConsent" 
+                      className="text-sm text-muted-foreground leading-none cursor-pointer select-none"
+                    >
+                      {t.rich('acceptPrivacyTerms', {
+                        privacyPolicy: (chunks) => (
+                          <a 
+                            href="https://www.kortix.com/legal?tab=privacy" 
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:underline underline-offset-2 transition-colors text-primary"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {chunks}
+                          </a>
+                        ),
+                        termsOfService: (chunks) => (
+                          <a 
+                            href="https://www.kortix.com/legal?tab=terms"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:underline underline-offset-2 transition-colors text-primary"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {chunks}
+                          </a>
+                        )
+                      })}
+                    </label>
+                  </div>
+                </>
               )}
               <div className="pt-2">
                 <div className="relative">
                   <SubmitButton
                     formAction={isSignUp ? handleSignUp : handleSignIn}
-                    className="w-full h-10 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors rounded-lg"
-                    pendingText={isSignUp ? "Creating account..." : "Signing in..."}
+                    className="w-full h-10"
+                    pendingText={isSignUp ? t('creatingAccount') : t('signingIn')}
+                    disabled={isSignUp && !acceptedTerms}
                   >
-                    {isSignUp ? 'Create account' : 'Sign in'}
+                    {isSignUp ? t('signUp') : t('signIn')}
                   </SubmitButton>
                   {wasEmailLastMethod && (
                     <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-background shadow-sm">
@@ -350,7 +380,7 @@ function LoginContent() {
                 </div>
               </div>
             </form>
-            
+
             <div className="mt-4 space-y-3 text-center text-sm">
               {!isSignUp && (
                 <button
@@ -358,30 +388,43 @@ function LoginContent() {
                   onClick={() => setForgotPasswordOpen(true)}
                   className="text-primary hover:underline"
                 >
-                  Forgot password?
+                  {t('forgotPassword')}
                 </button>
               )}
-              
+
               <div>
                 <Link
-                  href={isSignUp 
+                  href={isSignUp
                     ? `/auth${returnUrl ? `?returnUrl=${returnUrl}` : ''}`
                     : `/auth?mode=signup${returnUrl ? `&returnUrl=${returnUrl}` : ''}`
                   }
                   className="text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  {isSignUp 
-                    ? 'Already have an account? Sign in' 
-                    : "Don't have an account? Sign up"
+                  {isSignUp
+                    ? t('alreadyHaveAccount')
+                    : t('dontHaveAccount')
                   }
                 </Link>
               </div>
             </div>
           </div>
         </div>
-        <div className="hidden lg:flex flex-1 items-center justify-center bg-sidebar relative overflow-hidden">
-          <div className="absolute inset-0">
-            <Ripple />
+        <div className="hidden lg:flex flex-1 items-center justify-center relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-background via-background to-accent/10" />
+          <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+            <AnimatedBg
+              variant="hero"
+              customArcs={{
+                left: [
+                  { pos: { left: -120, top: 150 }, opacity: 0.15 },
+                  { pos: { left: -120, top: 400 }, opacity: 0.18 },
+                ],
+                right: [
+                  { pos: { right: -150, top: 50 }, opacity: 0.2 },
+                  { pos: { right: 10, top: 650 }, opacity: 0.17 },
+                ]
+              }}
+            />
           </div>
         </div>
       </div>
@@ -389,29 +432,28 @@ function LoginContent() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <div className="flex items-center justify-between">
-              <DialogTitle>Reset Password</DialogTitle>
+              <DialogTitle>{t('resetPassword')}</DialogTitle>
             </div>
             <DialogDescription>
-              Enter your email address and we'll send you a link to reset your password.
+              {t('resetPasswordDescription')}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleForgotPassword} className="space-y-4">
             <Input
               id="forgot-password-email"
               type="email"
-              placeholder="Email address"
+              placeholder={t('emailAddress')}
               value={forgotPasswordEmail}
               onChange={(e) => setForgotPasswordEmail(e.target.value)}
-              className="h-11 rounded-xl"
+              className=""
               required
             />
             {forgotPasswordStatus.message && (
               <div
-                className={`p-3 rounded-md flex items-center gap-3 ${
-                  forgotPasswordStatus.success
-                    ? 'bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900/50 text-green-800 dark:text-green-400'
-                    : 'bg-destructive/10 border border-destructive/20 text-destructive'
-                }`}
+                className={`p-3 rounded-md flex items-center gap-3 ${forgotPasswordStatus.success
+                  ? 'bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900/50 text-green-800 dark:text-green-400'
+                  : 'bg-destructive/10 border border-destructive/20 text-destructive'
+                  }`}
               >
                 {forgotPasswordStatus.success ? (
                   <CheckCircle className="h-4 w-4 flex-shrink-0" />
@@ -427,13 +469,13 @@ function LoginContent() {
                 onClick={() => setForgotPasswordOpen(false)}
                 className="h-10 px-4 border border-border bg-background hover:bg-accent transition-colors rounded-md"
               >
-                Cancel
+                {t('cancel')}
               </button>
               <button
                 type="submit"
                 className="h-10 px-4 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors rounded-md"
               >
-                Send Reset Link
+                {t('sendResetLink')}
               </button>
             </DialogFooter>
           </form>
